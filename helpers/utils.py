@@ -79,3 +79,18 @@ def show_img_mask(img_path: str = None, mask_path: str = None, figsize=None, **k
             plt.colorbar(handle, ax=axis, fraction=0.05)
     fig.tight_layout()
     plt.show()
+
+
+def compute_resize_shape_and_max_depth(in_height, in_width, min_feature_dim=16):
+    height_bits, width_bits = int(np.ceil(np.log2(in_height))), int(np.ceil(np.log2(in_width + 1)))
+    min_dist = float("inf")
+    out = None
+    for height_log in range(height_bits + 1):
+        for width_log in range(width_bits + 1):
+            height_resize, width_resize = 2 ** height_log, 2 ** width_log
+            candidate = abs(in_height - height_resize) + abs(in_width - width_resize)
+            if candidate <= min_dist:
+                min_dist = candidate
+                out = (height_resize, width_resize)
+
+    return out[0], out[1], int(min(np.log2(out[0] / 16), np.log2(out[1] / 16)))
