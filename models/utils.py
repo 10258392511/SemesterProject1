@@ -75,7 +75,7 @@ def auto_crop(enc_feature, dec_feature):
 
 
 def concat_enc_dec(enc, dec):
-    assert enc.shape == dec.shape, "'enc' and 'dec' should have the same shape"
+    assert enc.shape[0] == dec.shape[0] and enc.shape[2:] == dec.shape[2:], "'enc' and 'dec' should have the same shape"
 
     # concatenate along the feature dimension
     return torch.cat([enc, dec], dim=1)
