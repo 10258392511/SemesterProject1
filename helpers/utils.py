@@ -94,3 +94,40 @@ def compute_resize_shape_and_max_depth(in_height, in_width, min_feature_dim=16):
                 out = (height_resize, width_resize)
 
     return out[0], out[1], int(min(np.log2(out[0] / 16), np.log2(out[1] / 16)))
+
+
+def plot_training_history(train_loss, eval_loss, **kwargs):
+    # create x-ticks for "train_loss"
+    train_loss_ticks = []
+    for i, epoch_loss in enumerate(train_loss):
+        train_loss_ticks += np.arange(i, i + 1, 1 / len(epoch_loss)).tolist()
+
+    eval_loss_ticks = list(range(1, 1 + len(eval_loss)))
+    figsize = kwargs.get("figsize", plt.rcParams["figure.figsize"])
+    fig, axis = plt.subplots(figsize=figsize)
+    axis.plot(train_loss_ticks, np.array(train_loss).flatten(), label="train")
+    axis.plot(eval_loss_ticks, eval_loss, label="eval")
+    axis.grid(True)
+    axis.legend()
+    axis.set_xlabel("epoch")
+    axis.set_ylabel("loss")
+    axis.set_xticks(eval_loss_ticks)
+    axis.set_title("Training Curve")
+    plt.show()
+
+
+def plot_lr(learning_rates, **kwargs):
+    train_loss_ticks = []
+    for i, epoch_loss in enumerate(learning_rates):
+        train_loss_ticks += np.arange(i, i + 1, 1 / len(epoch_loss)).tolist()
+
+    eval_loss_ticks = list(range(1, 1 + len(learning_rates)))
+    figsize = kwargs.get("figsize", plt.rcParams["figure.figsize"])
+    fig, axis = plt.subplots(figsize=figsize)
+    axis.plot(train_loss_ticks, np.array(learning_rates).flatten())
+    axis.grid(True)
+    axis.set_xlabel("epoch")
+    axis.set_ylabel("learning rate")
+    axis.set_xticks(eval_loss_ticks)
+    axis.set_title("Learning Rate")
+    plt.show()

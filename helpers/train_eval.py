@@ -1,6 +1,7 @@
 import os
 import random
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torch.nn as nn
 import time
@@ -126,7 +127,7 @@ class CarTrainer(object):
                 torch.save(self.model.state_dict(), save_path)
 
             if if_plot:
-                index = random.randint(0, len(self.eval_loader.dataset))
+                index = random.randint(0, len(self.eval_loader.dataset) - 1)
                 img_tensor, mask_tensor = self.eval_loader.dataset[index]
                 # for img_tensor, mask_tensor in self.eval_loader:
                 #     break
@@ -162,3 +163,26 @@ def predict(model, img_tensor, device=None):
     img, mask = img_tensor.detach().cpu(), mask_tensor.detach().cpu()
 
     return img, mask
+
+
+def visualize_predictions(img_tensor, mask_tensor, mask_pred, indices=None):
+    # input shape: (B, C, H, W), (B, H, W), (B, H, W)
+    assert img_tensor.shape[0] == mask_tensor.shape[0] == mask_pred.shape[0], "all input tensors should have the " \
+                                                                              "same length"
+    if indices is None:
+        indices = [random.randint(0, img_tensor.shape[0] - 1)]
+    img, mask = img_tensor.permute(0, 2, 3, 1).numpy(), mask_tensor.numpy()
+    fig, axes_all = plt.subplots(len(indices), 3)
+
+    for i in range(len(indices)):
+        if len(indices) == 1:
+            axes = axes_all
+        else:
+            axes = axes_all[i, :]
+        axes[0].imshow(img[indices[i]])
+        axes[1].imshow(mask[indices[i]], cmap="gray")
+        axes[1].set_title("original")
+        axes[2].imshow(mask_pred[indices[i]].detach().cpu().numpy(), cmap="gray")
+        axes[2].set_title("predicted")
+    fig.tight_layout()
+    plt.show()
