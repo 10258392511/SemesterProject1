@@ -1,6 +1,11 @@
+import numpy as np
+import torch
 import torch.nn.functional as F
 
 from .utils import *
+
+# U-Net
+###################################################################
 
 
 class DownBlock(nn.Module):
@@ -105,3 +110,22 @@ class UpBlock(nn.Module):
         out = self.out_convs(merged)
 
         return out
+
+# MADE
+###################################################################
+
+
+class MaskedLinear(nn.Linear):
+    def __init__(self, n_din, n_out):
+        super(MaskedLinear, self).__init__(n_din, n_out)
+        self.register_buffer("mask", torch.ones_like(self.weight))
+
+    def set_mask(self, mask: np.ndarray):
+        assert isinstance(mask, np.ndarray), "please input a np.ndarray"
+        assert mask.shape == self.weight.shape, f"wrong shape: target shape is {self.weight.shape}"
+        self.mask.data.copy_(torch.from_numpy(mask.astype(np.uint8)))
+
+    def forward(self, x):
+        return F.linear(x, self.weight * self.mask, self.bias)
+
+
