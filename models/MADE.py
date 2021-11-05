@@ -1,5 +1,7 @@
 import numpy as np
+import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from pprint import pprint
 from .modules import MaskedLinear
 
@@ -7,6 +9,7 @@ from .modules import MaskedLinear
 class MADEBase(nn.Module):
     def __init__(self, in_shape, out_num_comp, hidden_sizes=None, ordering=None):
         super(MADEBase, self).__init__()
+        self.orginal_shape = in_shape
         self.in_shape = np.prod(in_shape).astype(np.int)  # (1, H, W) -> HW
         self.out_num_comp = out_num_comp  # e.g. 2 for MNIST
         self.out_shape = self.in_shape * self.out_num_comp  # HW * 2
@@ -56,7 +59,8 @@ class MADEBase(nn.Module):
 
 class MADE(MADEBase):
     def __init__(self, in_shape, out_num_comp, hidden_sizes=None, ordering=None):
-        super(MADE, self).__init__(in_shape, out_num_comp, hidden_sizes=None, ordering=None)
+        super(MADE, self).__init__(in_shape, out_num_comp, hidden_sizes=hidden_sizes, ordering=ordering)
+        self.inv_order = None
 
     def forward(self, x):
         batch_size = x.shape[0]
@@ -72,16 +76,44 @@ class MADE(MADEBase):
         batch_size = label.shape[0]
         label = label.view(batch_size, -1)  # (B, N)
         criterion = nn.CrossEntropyLoss()
-        dist_out = self(x)
+        dist_out = self(x)  # (B, out_num_comp, N)
         return criterion(dist_out, label)
 
-    def sample(self):
-        pass
+    @torch.no_grad()
+    def sample(self, num_samples, device=None):
+        if self.inv_order is None:
+            self.inv_order = {x: i for i, x in enumerate(self.ordering)}
+        if device is None:
+            device = torch.device("cuda")
+        samples_out = torch.zeros((num_samples, int(self.in_shape)), dtype=torch.float32, device=device)  # (B, Nin)
+        for generate_order in range(self.in_shape):
+            dist_out = self.forward(samples_out)  # (B, out_num_comp, Nin)
+            real_index = self.inv_order[generate_order]
+            cur_dist_out = F.softmax(dist_out[..., real_index], dim=1)  # (B, out_num_comp)
+            # sample instead of argmax
+            samples_out[:, real_index] = torch.multinomial(cur_dist_out, 1).squeeze()  # (B, 1) -> (B,)
+            # # debug only
+            # print(f"generating order: {generate_order}, real_index: {real_index}")
+            # print(samples_out)
+            # print("-" * 40)
+
+        return samples_out.detach().cpu().reshape(num_samples, *self.orginal_shape)  # (B, C, H, W)
 
 
 class MADEVAE(MADEBase):
-    def __init__(self, in_shape, out_num_comp, hidden_sizes=None, ordering=None):
-        super(MADEVAE, self).__init__(in_shape, out_num_comp, hidden_sizes=None, ordering=None)
+    def __init__(self, in_shape, out_num_comp=2, hidden_sizes=None, ordering=None):
+        assert len(in_shape) == 1, "Only for 1D feature"
+        super(MADEVAE, self).__init__(in_shape, out_num_comp=out_num_comp, hidden_sizes=hidden_sizes, ordering=ordering)
+        # out_num_comp: mu and sigma
 
-    def forward(self):
-        pass
+    def forward(self, z):
+        # X --q(z|x)--> Z --MADE--> eps ~ N(0; I)
+        # eps = z * sigma(z) + mu(z)
+        batch_size = z.shape[0]
+        z = z.view(batch_size, -1)  # (B, N)
+        for net in self.net:
+            z = net(z)
+
+        # (B, N * out_num_comp) -> (B, out_num_comp, N), in accordance with nn.CrossEntropyLoss(.)
+        mu, sigma = torch.chunk(z, 2, dim=1)
+        return mu, sigma
