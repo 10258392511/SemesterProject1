@@ -19,6 +19,9 @@ def lr_search(model, criterion, optimizer, train_loader, end_lr=1, device=None):
 
     return lr_finder.history
 
+######################################################################
+## CarTraininer ##
+
 
 class CarTrainer(object):
     def __init__(self, model, train_loader, eval_loader, optimizer,
@@ -186,3 +189,116 @@ def visualize_predictions(img_tensor, mask_tensor, mask_pred, indices=None):
         axes[2].set_title("predicted")
     fig.tight_layout()
     plt.show()
+
+######################################################################
+## MADETrainer ##
+
+
+class MADETrainer(object):
+    def __init__(self, model, train_loader, eval_loader, optimizer,
+                 lr_scheduler=None, device=None, epochs=20, notebook=True):
+        self.model = model
+        self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
+        self.train_loader = train_loader
+        self.eval_loader = eval_loader
+        self.device = device if device is not None else torch.device("cuda")
+        self.epochs = epochs
+        self.notebook = notebook
+
+    def _train(self):
+        self.model.train()
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.train_loader), desc="batch training", total=len(self.train_loader), leave=False)
+        losses = []
+
+        for i, (X, _) in pbar:
+            X = X.float().to(self.device)  # (B, H, W)
+            loss = self.model.loss(2 * X - 1, X.long())
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            losses.append(loss.item())
+            pbar.set_description(desc=f"training: batch {i + 1}/{len(self.train_loader)}, loss: {loss.item():.4f}")
+
+        return losses
+
+    @torch.no_grad()
+    def _eval(self):
+        self.model.eval()
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.eval_loader), desc="batch eval", total=len(self.eval_loader), leave=False)
+        avg_loss, num_samples = 0, 0
+        for i, (X, _) in pbar:
+            X = X.float().to(self.device)  # (B, H, W)
+            loss = self.model.loss(2 * X - 1, X.long())
+            avg_loss += loss.item() * X.shape[0]
+            num_samples += X.shape[0]
+            pbar.set_description(desc=f"eval: batch {i + 1}/{len(self.train_loader)}, loss: {loss.item():.4f}")
+
+        return avg_loss / num_samples
+
+    def train(self, if_plot=False):
+        model_path = self._change_and_make_dir()
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
+        pbar = trange(self.epochs, desc=f"epoch 1/{self.epochs}")
+        train_losses, eval_losses = [], []
+        best_eval_loss = float("inf")
+
+        for epoch in pbar:
+            train_loss = self._train()
+            train_losses.append(train_loss)
+            eval_loss = self._eval()
+            eval_losses.append(eval_loss)
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+            pbar.set_description(f"epoch {epoch + 1} loss: training: {np.array(train_loss).mean():.4f}, "
+                                 f"eval: {eval_loss:.4f}")
+            if if_plot:
+                self._end_of_epoch_plot(title=f"epoch {epoch + 1}")
+
+            if eval_loss < best_eval_loss:
+                best_eval_loss = eval_loss
+                for filename in os.listdir(model_path):
+                    filename = os.path.join(model_path, filename)
+                    if os.path.isfile(filename):
+                        os.remove(filename)
+                save_path = f"epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}".replace(".", "_") + ".pt"
+                save_path = os.path.join(model_path, save_path)
+                torch.save(self.model.state_dict(), save_path)
+
+        return train_losses, eval_losses
+
+    @torch.no_grad()
+    def _end_of_epoch_plot(self, **kwargs):
+        # for MNIST
+        sample = self.model.sample(1)  # (1, H, W)
+        fig, axis = plt.subplots()
+        title = kwargs.get("title", "")
+        handle = axis.imshow(sample[0, ...], cmap="gray")
+        plt.colorbar(handle, ax=axis)
+        axis.set_title(title)
+        plt.show()
+
+    def _change_and_make_dir(self):
+        orginal_dir = os.getcwd()
+        cur_dir = os.path.dirname(os.path.abspath(__file__))
+        parent_dir = os.path.dirname(cur_dir)
+        model_path = os.path.join(parent_dir, "params\made_mnist")
+        os.chdir(model_path)
+        new_dir = f"{time.time()}".replace(".", "_")
+        model_path = os.path.join(model_path, new_dir)
+        os.mkdir(model_path)
+        os.chdir(orginal_dir)
+
+        # params\made_mnist\time_stamp
+        return model_path

@@ -4,6 +4,8 @@ import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
 
+from torchvision.utils import make_grid
+
 
 def get_car_filenames(mode="train"):
     assert mode in ["train", "test"], "mode must be 'train' or 'test'"
@@ -130,4 +132,16 @@ def plot_lr(learning_rates, **kwargs):
     axis.set_ylabel("learning rate")
     axis.set_xticks(eval_loss_ticks)
     axis.set_title("Learning Rate")
+    plt.show()
+
+
+def MADE_sample_plot(model, num_rows=5, num_cols=5):
+    model.eval()
+    batch_size = num_rows * num_cols
+    samples = model.sample(batch_size)  # (B, H, W)
+    samples = samples.unsqueeze(1)  # (B, 1, H, W)
+    grid_tensor = make_grid(samples, num_rows)  # (1, H', W')
+    fig, axis = plt.subplots()
+    handle = axis.imshow(grid_tensor.permute(1, 2, 0).numpy(), cmap="gray")
+    plt.colorbar(handle, ax=axis)
     plt.show()

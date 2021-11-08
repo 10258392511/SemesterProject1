@@ -39,3 +39,21 @@ class CarDataset(Dataset):
 
         # (H, W, C) -> (C, H, W)
         return image.permute(2, 0, 1), mask
+
+
+class MNISTForMADE(Dataset):
+    def __init__(self, data_tensor, transform=None):
+        super(Dataset, self).__init__()
+        self.dataset = data_tensor
+        self.transform = transform
+
+    def __len__(self):
+        return self.dataset.shape[0]
+
+    def __getitem__(self, index):
+        label = self.dataset[index, ...].unsqueeze(0).float() / 255. # (28, 28) -> (1, 28, 28)
+        img = label
+        # print(f"inside MNITforMADE: {img.max()}")
+        if self.transform is not None:
+            img = self.transform(img)
+        return 2 * img - 1, label.long()
