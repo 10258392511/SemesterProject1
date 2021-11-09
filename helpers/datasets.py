@@ -51,8 +51,10 @@ class MNISTForMADE(Dataset):
         return self.dataset.shape[0]
 
     def __getitem__(self, index):
-        label = self.dataset[index, ...].unsqueeze(0).float() / 255. # (28, 28) -> (1, 28, 28)
-        img = label
+        img = self.dataset[index, ...].unsqueeze(0).float() / 255  # (28, 28) -> (1, 28, 28)
+        label = (img >= 0.5)
+        # label = self.dataset[index, ...].unsqueeze(0).float() / 255.
+        # img = label
         # print(f"inside MNITforMADE: {img.max()}")
         if self.transform is not None:
             img = self.transform(img)

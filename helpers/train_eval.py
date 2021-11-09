@@ -216,8 +216,11 @@ class MADETrainer(object):
         losses = []
 
         for i, (X, _) in pbar:
-            X = X.float().to(self.device)  # (B, H, W)
-            loss = self.model.loss(2 * X - 1, X.long())
+            X = (X >= 0.5)
+            X_img = X.float().to(self.device)
+            label = X.long().to(self.device)
+            # loss = self.model.loss(X_img * 2 - 1, label)
+            loss = self.model.loss(X_img, label)
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -236,11 +239,14 @@ class MADETrainer(object):
         pbar = tqdm(enumerate(self.eval_loader), desc="batch eval", total=len(self.eval_loader), leave=False)
         avg_loss, num_samples = 0, 0
         for i, (X, _) in pbar:
-            X = X.float().to(self.device)  # (B, H, W)
-            loss = self.model.loss(2 * X - 1, X.long())
+            X = (X >= 0.5)
+            X_img = X.float().to(self.device)
+            label = X.long().to(self.device)
+            # loss = self.model.loss(X_img * 2 - 1, label)
+            loss = self.model.loss(X_img, label)
             avg_loss += loss.item() * X.shape[0]
             num_samples += X.shape[0]
-            pbar.set_description(desc=f"eval: batch {i + 1}/{len(self.train_loader)}, loss: {loss.item():.4f}")
+            pbar.set_description(desc=f"eval: batch {i + 1}/{len(self.eval_loader)}, loss: {loss.item():.4f}")
 
         return avg_loss / num_samples
 

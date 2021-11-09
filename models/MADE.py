@@ -28,6 +28,7 @@ class MADEBase(nn.Module):
         activation_orders = [self.ordering]
         for i in range(1, num_activations - 1):
             order = np.random.randint(0, self.in_shape, (feature_sizes[i],))
+            # order = np.random.randint(activation_orders[i - 1].min(), self.in_shape, (feature_sizes[i],))
             while 0 not in order:
                 order = np.random.randint(0, self.in_shape, (feature_sizes[i],))
             activation_orders.append(order)
@@ -68,8 +69,10 @@ class MADE(MADEBase):
         for net in self.net:
             x = net(x)
 
-        # (B, N * out_num_comp) -> (B, out_num_comp, N), in accordance with nn.CrossEntropyLoss(.)
-        return x.reshape(batch_size, self.out_num_comp, -1).contiguous()
+        # (B, N * out_num_comp) -> (B, N, out_num_comp) -> (B, out_num_comp, N)
+        # in accordance with nn.CrossEntropyLoss(.)
+        # note .permute() is a must, otherwise: [0, 0, 0, 1, 1, 1] -> [[0, 0], [0, 1], [1, 1]] which is wrong!
+        return x.reshape(batch_size, -1, self.out_num_comp).permute(0, 2, 1).contiguous()
 
     def loss(self, x, label):
         # x: (B, C, H, W), torch.float32, label: (B, C, H, W), torch.int64
@@ -114,6 +117,11 @@ class MADEVAE(MADEBase):
         for net in self.net:
             z = net(z)
 
-        # (B, N * out_num_comp) -> (B, out_num_comp, N), in accordance with nn.CrossEntropyLoss(.)
-        mu, sigma = torch.chunk(z, 2, dim=1)
-        return mu, sigma
+        # out_num_comp = 2
+        # (B, 2 * latent_size) -> (B, latent_size, 2) -> (B, latent_size, 1) each -> (B, latent_size)
+        # e.g [[1, 1, 2, 2]] -> [[1, 2]], [[1, 2]] not [[1, 1]], [[2, 2]]
+        z_reshape = z.view(batch_size, self.in_shape, self.out_num_comp).contiguous()
+        # # debug only
+        # print(f"inside MADEVAE: .forward(.): z:\n{z}")
+        mu, sigma = torch.chunk(z_reshape, 2, dim=-1)
+        return mu.squeeze(), sigma.squeeze()
