@@ -129,3 +129,75 @@ class MaskedLinear(nn.Linear):
         return F.linear(x, self.weight * self.mask, self.bias)
 
 
+# RealNVP
+###################################################################
+class WeightNormConv2d(nn.Module):
+    def __init__(self, *args, **kwargs):
+        super(WeightNormConv2d, self).__init__()
+        self.conv = nn.utils.weight_norm(nn.Conv2d(*args, **kwargs))  # (C_in, C_out, K, K), re-parameterization: dim=0
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+        return self.conv(x)
+
+
+class ActNorm(nn.Module):
+    # Normalize each channel of an instance
+    def __init__(self, num_channels):
+        super(ActNorm, self).__init__()
+        self.num_channels = num_channels
+        self.log_scale = nn.Parameter(torch.zeros((1, num_channels, 1, 1), dtype=torch.float32))
+        self.shift = nn.Parameter(torch.zeros((1, num_channels, 1, 1), dtype=torch.float32))
+        self.if_init = False
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+        if not self.if_init:
+            self.if_init = True
+            x_std = torch.std(x,dim=[0, 2, 3], keepdim=True)  # (1, C, 1, 1)
+            self.log_scale.data = -torch.log(x_std)
+            self.shift.data = -torch.mean(x, dim=[0, 2, 3], keepdim=True) / x_std
+
+        x = x * self.log_scale.exp() + self.shift  # (B, C, H, W)
+        log_det = self.log_scale  # (1, C, 1, 1), broadcast later
+
+        return x, log_det
+
+
+class ResnetBlock(nn.Module):
+    def __init__(self, num_channels):
+        super(ResnetBlock, self).__init__()
+        self.num_channels = num_channels
+        self.net = nn.Sequential(
+            WeightNormConv2d(in_channels=num_channels, out_channels=num_channels, kernel_size=1),
+            nn.ReLU(),
+            WeightNormConv2d(in_channels=num_channels, out_channels=num_channels, kernel_size=3, padding=1),
+            nn.ReLU(),
+            WeightNormConv2d(in_channels=num_channels, out_channels=num_channels, kernel_size=1)
+        )
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+        x = x + self.net(x)  # (B, C, H, W)
+
+        return x
+
+
+class ResnetLittle(nn.Module):
+    def __init__(self, in_channels, out_channels, num_filters=128, num_blocks=8):
+        super(ResnetLittle, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.num_filters = num_filters
+        self.num_blocks = num_blocks
+        net = [WeightNormConv2d(in_channels=in_channels, out_channels=num_filters, kernel_size=3, padding=1), nn.ReLU()]
+        for _ in range(num_blocks):
+            net.append(ResnetBlock(num_filters))
+        net.extend([nn.ReLU(), WeightNormConv2d(in_channels=num_filters, out_channels=out_channels, kernel_size=3,
+                                                padding=1)])
+        self.net = nn.Sequential(*net)
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+        # x_out: (B, 2 * C, H, W)
+        return self.net(x)
