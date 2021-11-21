@@ -150,7 +150,7 @@ class ActNorm(nn.Module):
         self.shift = nn.Parameter(torch.zeros((1, num_channels, 1, 1), dtype=torch.float32))
         self.if_init = False
 
-    def forward(self, x):
+    def forward(self, x, reverse=False):
         # x: (B, C, H, W)
         if not self.if_init:
             self.if_init = True
@@ -158,10 +158,14 @@ class ActNorm(nn.Module):
             self.log_scale.data = -torch.log(x_std)
             self.shift.data = -torch.mean(x, dim=[0, 2, 3], keepdim=True) / x_std
 
-        x = x * self.log_scale.exp() + self.shift  # (B, C, H, W)
+        if reverse:
+            x_out = (x - self.shift) * (-self.log_scale).exp()
+            return x_out, None
+
+        x_out = x * self.log_scale.exp() + self.shift  # (B, C, H, W)
         log_det = self.log_scale  # (1, C, 1, 1), broadcast later
 
-        return x, log_det
+        return x_out, log_det
 
 
 class ResnetBlock(nn.Module):
@@ -201,3 +205,69 @@ class ResnetLittle(nn.Module):
         # x: (B, C, H, W)
         # x_out: (B, 2 * C, H, W)
         return self.net(x)
+
+
+class AffineCheckerboard(nn.Module):
+    def __init__(self, mask_type, in_channels, num_filters=128, num_blocks=8, device=None):
+        assert mask_type == 0 or mask_type == 1, "mask_type should be 0 or 1"
+        super(AffineCheckerboard, self).__init__()
+        self.mask_type = mask_type
+        self.resnet = ResnetLittle(in_channels=in_channels, out_channels=2 * in_channels, num_filters=num_filters,
+                                   num_blocks=num_blocks)
+        self.scale_for_log_scale = nn.Parameter(torch.zeros(1))
+        self.shift_for_log_scale = nn.Parameter(torch.zeros(1))  # these two are broadcast later
+        self.device = device if device is not None else torch.device("cuda")
+
+    def forward(self, x, reverse=False):
+        # x: (B, C, H, W)
+        B, C, H, W = x.shape
+        mask = (torch.arange(0, H).unsqueeze(1) + torch.arange(0, W) + self.mask_type) % 2
+        self.register_buffer("mask", mask.to(self.device).view(1, 1, H, W))
+        # print(f"mask: {self.mask[0, 0]}")
+        x_ = self.mask * x
+        log_s, t = self.resnet(x_).chunk(2, dim=1)  # (B, 2 * C, H, W) -> (B, C, H, W) each
+        log_s = log_s * self.scale_for_log_scale + self.shift_for_log_scale
+        log_s, t = log_s * (1 - self.mask), t * (1 - self.mask)  # now operate on unconditioned part, (B, C, H, W) each
+        if reverse:
+            x_out = (x - t) * (-log_s).exp()
+            return x_out, None
+
+        x_out = x * log_s.exp() + t
+        # log_det = log_s: (B, C, H, W)
+        return x_out, log_s
+
+
+class AffineChannel(nn.Module):
+    def __init__(self, modify_top, in_channels, num_filters=128, num_blocks=8):
+        super(AffineChannel, self).__init__()
+        self.modify_top = modify_top
+        self.resnet = ResnetLittle(in_channels=in_channels, out_channels=2 * in_channels, num_filters=num_filters,
+                                   num_blocks=num_blocks)
+        self.scale_for_log_scale = nn.Parameter(torch.zeros(1))
+        self.shift_for_log_scale = nn.Parameter(torch.zeros(1))  # these two are broadcast later
+
+    def forward(self, x, reverse=False):
+        # x: (B, C, H, W)
+        B, C, H, W = x.shape
+        assert C % 2 == 0, "number of channels should be even"
+        if self.modify_top:
+            x_off = x[:, C // 2:, ...]  # (B, C // 2, H, W) each
+            x_on = x[:, :C // 2, ...]
+        else:
+            x_on = x[:, C // 2:, ...]
+            x_off = x[:, :C // 2, ...]
+        log_s, t = self.resnet(x_off).chunk(2, dim=1)  # (B, C, H, W) -> (B, C // 2, H, W) each
+        log_s = log_s * self.scale_for_log_scale + self.shift_for_log_scale
+        if reverse:
+            x_on_out = (x_on - t) * (-log_s).exp()
+            if self.modify_top:
+                return torch.cat([x_on_out, x_off], dim=1), None
+            else:
+                return torch.cat([x_off, x_on_out], dim=1), None
+
+        x_on_out = x_on * log_s.exp() + t
+        if self.modify_top:
+            # log_det: (B, C, H, W)
+            return torch.cat([x_on_out, x_off], dim=1), torch.cat([log_s, torch.zeros_like(log_s)], dim=1)
+        else:
+            return torch.cat([x_off, x_on_out], dim=1), torch.cat([torch.zeros_like(log_s), log_s], dim=1)
