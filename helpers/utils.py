@@ -3,6 +3,8 @@ import os
 import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
+import torch
+import torch.nn.functional as F
 
 from torchvision.utils import make_grid
 
@@ -145,3 +147,31 @@ def MADE_sample_plot(model, num_rows=5, num_cols=5):
     handle = axis.imshow(grid_tensor.permute(1, 2, 0).numpy(), cmap="gray")
     plt.colorbar(handle, ax=axis)
     plt.show()
+
+
+@torch.no_grad()
+def real_nvp_preprocess(x, dequantize=True, alpha=0.95, max_value=256, reverse=False):
+    """
+    x: (B, C, H, W)
+    x -> logit(alpha + (1 - alpha) * x / max_value), possibly with dequantization.
+    """
+    if reverse:
+        x1 = 1 / (1 + torch.exp(-x))
+        x_out = (x1 - alpha) / (1 - alpha)
+
+        # x_out is in [0, 1]
+        return x_out, None
+
+    x = x.float()
+    # print(f"x: {x}")
+    if dequantize:
+        x = x + torch.rand_like(x)
+        # print(f"dequantized: {x}")
+
+    x1 = x / max_value * (1 - alpha) + alpha
+    x_out = torch.log(x1) - torch.log(1 - x1)
+    log_det = F.softplus(torch.exp(-x_out)) + F.softplus(torch.exp(x_out)) + torch.log(torch.tensor(1 - alpha))\
+              - torch.log(torch.tensor(max_value))
+
+    # x_out: (B, C, H, W), log_det: (B,)
+    return x_out, log_det.sum(dim=[1, 2, 3])

@@ -1,13 +1,16 @@
 import torch
 import torch.nn as nn
 
+from torch.distributions import Normal
 from .modules import ActNorm, AffineCheckerboard, AffineChannel
 
+
 class RealNVP(nn.Module):
-    def __init__(self, in_channels, device=None):
+    def __init__(self, in_channels, prior=None, device=None):
         super(RealNVP, self).__init__()
         self.in_channels = in_channels
         self.device = device if device is not None else torch.device("cuda")
+        self.prior = Normal(torch.zeros(1).to(self.device), torch.ones(1).to(self.device)) if prior is None else prior
 
         checkerboard1 = [AffineCheckerboard(mask_type=1, in_channels=in_channels, device=self.device)]
         for mask_type in [0, 1, 0]:
@@ -82,3 +85,20 @@ class RealNVP(nn.Module):
 
         # both (B, C, H, W)
         return x, log_det_out
+
+    def log_prob(self, x):
+        # x: (B, C, H, W)
+        z, log_det = self.forward(x)
+        log_prob_z = self.prior.log_prob(z)
+
+        # (B, C, H, W) -> (B,), not averaged because data pre-processing will add another log_det
+        return (log_prob_z + log_det).sum(dim=[1, 2, 3])
+
+    @torch.no_grad()
+    def sample(self, num_samples, in_shape):
+        assert isinstance(in_shape, tuple) and len(in_shape) == 3, "in_shape must be a tuple of three components"
+        z = self.prior.sample((num_samples, *in_shape)).squeeze()  # (B, C, H, W, 1) -> (B, C, H, W)
+        x, _ = self.forward(z, reverse=True)
+
+        # x: (B, C, H, W)
+        return x.detach().cpu()
