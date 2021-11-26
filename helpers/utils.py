@@ -175,3 +175,9 @@ def real_nvp_preprocess(x, dequantize=True, alpha=0.95, max_value=256, reverse=F
 
     # x_out: (B, C, H, W), log_det: (B,)
     return x_out, log_det.sum(dim=[1, 2, 3])
+
+
+@torch.no_grad()
+def real_nvp_interpolation_grid(num_rows=5, num_cols=5):
+    # TODO
+    pass

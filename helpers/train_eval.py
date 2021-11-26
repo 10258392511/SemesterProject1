@@ -7,6 +7,7 @@ import torch.nn as nn
 import time
 
 from torch_lr_finder import LRFinder
+from .utils import real_nvp_preprocess
 
 
 def lr_search(model, criterion, optimizer, train_loader, end_lr=1, device=None):
@@ -308,3 +309,127 @@ class MADETrainer(object):
 
         # params\made_mnist\time_stamp
         return model_path
+
+######################################################################
+## RealNVPTrainer ##
+
+
+class RealNVPTrainer(object):
+    def __init__(self, model, train_loader, eval_loader, optimizer,
+                 lr_scheduler=None, device=None, epochs=20, notebook=True):
+        self.model = model
+        self.train_loader = train_loader
+        self.eval_loader = eval_loader
+        self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
+        self.device = torch.device("cuda") if device is None else device
+        self.epochs = epochs
+        self.notebook = notebook
+
+    def _train(self):
+        self.model.train()
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.train_loader), desc="training", total=len(self.train_loader), leave=False)
+        losses = []
+        for i, (X, _) in pbar:
+            X = X.float().to(self.device) * 255  # [0, 255]
+            X, log_det = real_nvp_preprocess(X)  # (B, C, H, W), (B,)
+            log_prob_model = self.model.log_prob(X)
+            loss = -(log_prob_model + log_det)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+            losses.append(loss.item())
+            pbar.set_description(f"batch {i + 1}/{len(self.train_loader)}: training loss: {losses[-1]:.4f}")
+
+        return losses
+
+    @torch.no_grad()
+    def _eval(self):
+        self.model.eval()
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.eval_loader), desc="validation", total=len(self.eval_loader), leave=False)
+        num_samples = 0
+        loss_avg = 0
+        for i, (X, _) in pbar:
+            X = X.float().to(self.device) * 255  # [0, 255]
+            X, log_det = real_nvp_preprocess(X)  # (B, C, H, W), (B,)
+            log_prob_model = self.model.log_prob(X)
+            loss = -(log_prob_model + log_det)
+            loss_avg += loss * X.shape[0]
+            num_samples += X.shape[0]
+            pbar.set_description(f"batch {i + 1}/{len(self.eval_loader)}: eval loss: {loss.item:.4f}")
+
+        return loss_avg / num_samples
+
+    def train(self, if_plot=True, model_save_dir=None):
+        """
+        model_save_dir: root of all param folders
+        """
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
+        time_stamp = self._create_save_folder(model_save_dir)
+
+        pbar = trange(self.epochs, desc="epochs")
+        train_losses, eval_losses = [], []
+        lowest_loss = float("inf")
+        for epoch in pbar:
+            train_loss = self._train()
+            eval_loss = self._eval()
+            # save the best model so far
+            if eval_loss < lowest_loss:
+                lowest_loss = eval_loss
+                if model_save_dir is not None:
+                    self._save_latest_model(time_stamp, epoch, eval_loss, model_save_dir)
+
+            train_losses.append(train_loss)
+            eval_losses.append(eval_loss)
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+            pbar.set_description(f"epoch: {epoch + 1}/{self.epochs}, training loss: {train_loss[-1]:.4f}, "
+                                 f"eval loss: {eval_loss[-1]:.4f}")
+        if if_plot:
+            # TODO
+            self._eval_sample_plot()
+
+    def _create_save_folder(self, model_save_dir=None):
+        """
+        This should be called at the root of the project. model_save_dir is the root folder:
+        model_save_dir/
+        -time_stamp_and_additional_info/
+        --model.pt (to save in self._save_latest_model(.))
+        """
+        assert model_save_dir is not None, "please specify a save directory"
+        if not os.path.isdir(model_save_dir):
+            os.mkdir(model_save_dir)
+        original_wd = os.getcwd()
+        os.chdir(model_save_dir)
+        time_stamp = f"{time.time()}".replace(".", "_")
+        os.mkdir(time_stamp)
+        os.chdir(original_wd)
+
+        return time_stamp
+
+    def _save_latest_model(self, time_stamp, epoch, eval_loss, model_save_dir=None):
+        assert model_save_dir is not None, "please specify a save directory"
+        original_wd = os.getcwd()
+        os.chdir(model_save_dir)
+        os.chdir(time_stamp)
+        # remove all old files
+        for filename in os.listdir():
+            if os.path.isfile(filename):
+                os.remove(filename)
+        filename = f"epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}".replace(".", "_") + ".pt"
+        torch.save(self.model.state_dict(), filename)
+        os.chdir(original_wd)
+
+    def _eval_sample_plot(self):
+        pass
