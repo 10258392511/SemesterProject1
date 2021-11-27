@@ -271,3 +271,114 @@ class AffineChannel(nn.Module):
             return torch.cat([x_on_out, x_off], dim=1), torch.cat([log_s, torch.zeros_like(log_s)], dim=1)
         else:
             return torch.cat([x_off, x_on_out], dim=1), torch.cat([torch.zeros_like(log_s), log_s], dim=1)
+
+# MNISTVAE
+###################################################################
+
+
+class MNISTEncoder(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(MNISTEncoder, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.convs = nn.Sequential(
+            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.Conv2d(16, 32, kernel_size=3, padding=1, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, padding=1, stride=2),
+        )
+        self.fc = nn.Linear(3136, out_channels)
+
+    def forward(self, X):
+        # X: (B, 3, 28, 28)
+        batch_size = X.shape[0]
+        X = self.convs(X)  # (B, 64, 7, 7)
+        X = X.view(batch_size, -1)  # (B, 3136)
+        X = self.fc(X)  # (B, 2 * lat_dim) or (B, lat_dim)
+
+        return X
+
+
+class MNISTDecoder(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super(MNISTDecoder, self).__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.fc = nn.Sequential(
+            nn.Linear(in_channels, 1568),
+            nn.ReLU()
+        )
+        self.convs = nn.Sequential(
+            nn.ConvTranspose2d(32, 32, kernel_size=4, padding=1, stride=2),
+            nn.ReLU(),
+            nn.ConvTranspose2d(32, 16, kernel_size=4, padding=1, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(16, out_channels, kernel_size=3, padding=1)
+        )
+
+    def forward(self, X):
+        # X: (B, lat_dim)
+        batch_size = X.shape[0]
+        X = self.fc(X)  # (B, 1568)
+        X = X.view(batch_size, 32, 7, 7)
+        X = self.convs(X)  # (B, 3, 28, 28)
+
+        return X
+
+
+class Warper(nn.Module):
+    def __init__(self, lat_dim):
+        super(Warper, self).__init__()
+        self.lat_dim = lat_dim
+        self.encoder = MNISTEncoder(6, lat_dim)
+        self.decoder = MNISTDecoder(lat_dim, 2)
+
+    def forward(self, X1, X2):
+        # X1, X2: (B, C, H, W) each
+        X = torch.cat([X1, X2], dim=1)  # (B, 2 * C, H, W)
+        Z = self.encoder(X)  # (B, lat_dim)
+        warp_field = self.decoder(Z)  # (B, 2, H, W)
+
+        return warp_field
+
+
+class MNISTVAE(nn.Module):
+    def __init__(self, lat_dim, lat_split_ind, device=None):
+        assert 0 <= lat_split_ind < lat_dim, "invalid lat_split_ind"
+        super(MNISTVAE, self).__init__()
+        self.lat_dim = lat_dim
+        self.lat_split_ind = lat_split_ind
+        self.device = device if device is not None else torch.device("cuda")
+        self.encoder = MNISTEncoder(3, 2 * lat_dim)
+        self.decoder = MNISTDecoder(lat_dim, 3)
+
+    def forward(self, X1, X2):
+        # X1, X2: (B, 3, 28, 28) each
+        # reconstruction
+        X1 = 2 * X1 - 1
+        X2 = 2 * X2 - 1
+        Z1_mu, Z1_log_sigma = torch.chunk(self.encoder(X1), 2, dim=1)  # (B, lat_dim) each
+        Z2_mu, Z2_log_sigma = torch.chunk(self.encoder(X2), 2, dim=1)
+        Z1 = Z1_mu + torch.randn_like(Z1_mu) * Z1_log_sigma.exp()
+        Z2 = Z2_mu + torch.randn_like(Z2_mu) * Z2_log_sigma.exp()
+        X1 = self.decoder(Z1)
+        X2 = self.decoder(Z2)
+
+        # disentanglement
+        t = torch.rand((1,)).to(self.device)
+        Z1_int, Z1_shape = Z1_mu[:, :self.lat_split_ind], Z1_mu[:, self.lat_split_ind:] # (B, lat_dim') for each
+        Z2_int, Z2_shape = Z2_mu[:, :self.lat_split_ind], Z2_mu[:, self.lat_split_ind:]
+        Z_int_interp = Z1_int + t * (Z2_int - Z1_int)
+        Z_shape_interp = Z1_shape + t * (Z2_shape - Z1_shape)
+        Z_int_interp_shape_1, Z_int_interp_shape_2 = torch.cat([Z_int_interp, Z1_shape], dim=1), \
+                                                     torch.cat([Z_int_interp, Z2_shape], dim=1)
+        Z_int_1_shape_interp, Z_int_2_shape_interp = torch.cat([Z1_int, Z_shape_interp], dim=1), \
+                                                     torch.cat([Z2_int, Z_shape_interp], dim=1)
+        X_int_interp_shape_1, X_int_interp_shape_2 = self.decoder(Z_int_interp_shape_1), \
+                                                     self.decoder(Z_int_interp_shape_2)
+        X_int_1_shape_interp, X_int_2_shape_interp = self.decoder(Z_int_1_shape_interp), \
+                                                     self.decoder(Z_int_2_shape_interp)
+
+        return Z1_mu, Z1_log_sigma, Z2_mu, Z2_log_sigma,\
+               X1, X2, X_int_interp_shape_1, X_int_interp_shape_2, X_int_1_shape_interp, X_int_2_shape_interp

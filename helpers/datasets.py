@@ -1,8 +1,11 @@
 import numpy as np
 import cv2 as cv
 import torch
+import matplotlib.pyplot as plt
 
 from torch.utils.data import Dataset, DataLoader
+from torchvision.datasets import MNIST
+from torchvision.transforms import ToTensor
 from albumentations import BasicTransform, Compose
 from .utils import convert_mask
 
@@ -59,3 +62,42 @@ class MNISTForMADE(Dataset):
         if self.transform is not None:
             img = self.transform(img)
         return 2 * img - 1, label.long()
+
+
+class ColorMNIST(Dataset):
+    def __init__(self, root=None, train=True, transform=None, class_label=9):
+        assert root is not None, "Please specify where to store MNIST"
+        assert class_label in list(range(10)), "class_label should be 0 to 9"
+        super(ColorMNIST, self).__init__()
+        if transform is None:
+            transform = ToTensor()
+        self.dataset = MNIST(root=root, train=train, transform=transform, download=False)
+        self.y = class_label
+        X, y = self.dataset.data, self.dataset.targets
+        self.X = X[y==class_label] / 255.
+
+    def __len__(self):
+        return self.X.shape[0]
+
+    def __getitem__(self, index):
+        num_samples = self.X.shape[0]
+        img1 = self.X[index]  # (28, 28)
+        another_ind = np.random.randint(0, num_samples)
+        while another_ind == index:
+            another_ind = np.random.randint(0, num_samples)
+        img2 = self.X[another_ind]
+        # add background
+        img1_out = torch.zeros((3, *img1.shape))
+        img2_out = torch.zeros((3, *img1.shape))
+        rgb1, rgb2 = torch.rand((3, 1, 1)), torch.rand((3, 1, 1))
+        img1_out = torch.clip(img1_out + img1.unsqueeze(0) + rgb1, 0, 1)
+        img2_out = torch.clip(img2_out + img2.unsqueeze(0) + rgb2, 0, 1)
+
+        return img1_out, img2_out
+
+    def plot_pair(self, img1, img2):
+        # img1, img2: (3, 28, 28)
+        fig, axes = plt.subplots(1, 2)
+        axes[0].imshow(img1.permute(1, 2, 0))
+        axes[1].imshow(img2.permute(1, 2, 0))
+        plt.show()

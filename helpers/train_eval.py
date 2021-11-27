@@ -7,7 +7,7 @@ import torch.nn as nn
 import time
 
 from torch_lr_finder import LRFinder
-from .utils import real_nvp_preprocess
+from .utils import real_nvp_preprocess, compute_derivatives, warp_optical_flow
 
 
 def lr_search(model, criterion, optimizer, train_loader, end_lr=1, device=None):
@@ -432,4 +432,180 @@ class RealNVPTrainer(object):
         os.chdir(original_wd)
 
     def _eval_sample_plot(self):
+        # TODO: implementation
+        pass
+
+
+######################################################################
+## MNISTVAETrainer ##
+class MNISTVAETrainer(object):
+    def __init__(self, vae, int_warper, shape_warper, train_loader, eval_loader, vae_optimizer,
+                 int_warper_optimizer, shape_warper_optimizer, lr_scheduler=None,
+                 epochs=20, warper_batch_portion=0.5, deriv_win_size=5, lamda_warper=1, lamda_warp_recons=1,
+                 device=None, notebook=True):
+        self.vae = vae
+        self.int_warper = int_warper
+        self.shape_warper = shape_warper
+        self.train_loader = train_loader
+        self.eval_loader = eval_loader
+        self.vae_optimizer = vae_optimizer
+        self.int_warper_optimizer = int_warper_optimizer
+        self.shape_warper_optimizer = shape_warper_optimizer
+        self.lr_scheduler = lr_scheduler
+        self.epochs = epochs
+        self.device = device if device is not None else torch.device("cuda")
+        self.notebook = notebook
+        self.warper_batch_portion = warper_batch_portion
+        self.deriv_win_size = deriv_win_size
+        self.lamda_warper = lamda_warper
+        self.lamda_warp_recons = lamda_warp_recons
+
+    def _train(self):
+        self.vae.train()
+        self.int_warper.train()
+        self.shape_warper.train()
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        losses = dict(int_warper=[], shape_warper=[], int_warper_smooth=[], shape_warper_smooth=[],
+                      recons=[], kl=[], int_warper_vae=[], shape_warper_vae=[])
+        mse_loss = nn.MSELoss()
+        pbar = tqdm(enumerate(self.train_loader), total=int(len(self.train_loader) * self.warper_batch_portion),
+                    desc="training", leave=False)
+        # train warpers
+        for i, (X1, X2) in pbar:
+            if i > self.warper_batch_portion * len(self.train_loader):
+                break
+            X1, X2 = X1.float().to(self.device), X2.float().to(self.device)
+            Z1_mu, Z1_log_sigma, Z2_mu, Z2_log_sigma, \
+            X1_hat, X2_hat, X_int_interp_shape_1, X_int_interp_shape_2, X_int_1_shape_interp, X_int_2_shape_interp = \
+                self.vae(X1, X2)  # (B, lat_dim) for Z, (B, C, H, W) for X
+
+            # intensity warper
+            log_s_1, t_1 = torch.chunk(self.int_warper(X_int_interp_shape_1, X1), 2, dim=1)  # (B, 1, H, W) each
+            X1_hat = X_int_interp_shape_1 * log_s_1.exp() + t_1  ### intensity warper: per pixel on all channels
+            log_s_2, t_2 = torch.chunk(self.int_warper(X_int_interp_shape_2, X2), 2, dim=1)
+            X2_hat = X_int_interp_shape_2 * log_s_2.exp() + t_2
+            loss_1 = mse_loss(X1_hat, X1)
+            loss_2 = mse_loss(X2_hat, X2)
+            loss_int_warper = (loss_1 + loss_2) / 2
+            loss_int_warper_smooth = 0
+            for img in [log_s_1, t_1, log_s_2, t_2]:
+                Ix, Iy = compute_derivatives(img, win_size=self.deriv_win_size)  # (B, 1, H, W) each
+                loss_int_warper_smooth += (Ix ** 2).mean() + (Iy ** 2).mean()
+            loss_int_warper_smooth /= 2
+            loss_int_all = loss_int_warper + self.lamda_warper * loss_int_warper_smooth
+            self.int_warper_optimizer.zero_grad()
+            loss_int_all.backward()
+            self.int_warper_optimizer.step()
+            losses["int_warper"].append(loss_int_warper.item())
+            losses["int_warper_smooth"].append(loss_int_warper_smooth.item())
+
+            # shape warper
+            uv_1 = self.shape_warper(X_int_1_shape_interp, X1)  # (B, 2, H, W)
+            X1_hat = warp_optical_flow(X_int_1_shape_interp, uv_1.permute(0, 2, 3, 1))
+            uv_2 = self.shape_warper(X_int_2_shape_interp, X2)  # (B, 2, H, W)
+            X2_hat = warp_optical_flow(X_int_2_shape_interp, uv_2.permute(0, 2, 3, 1))
+            loss_1 = mse_loss(X1_hat, X1)
+            loss_2 = mse_loss(X2_hat, X2)
+            loss_shape_warper = (loss_1 + loss_2) / 2
+            loss_shape_warper_smooth = 0
+            for img in [*uv_1.chunk(2, dim=1), *uv_2.chunk(2, dim=1)]:
+                Ix, Iy = compute_derivatives(img, win_size=self.deriv_win_size)  # (B, 1, H, W) each
+                loss_shape_warper_smooth += (Ix ** 2).mean() + (Iy ** 2).mean()
+            loss_shape_warper_smooth /= 2
+            loss_shape_all = loss_shape_warper + self.lamda_warper * loss_shape_warper_smooth
+            self.shape_warper_optimizer.zero_grad()
+            loss_shape_all.backward()
+            self.shape_warper_optimizer.step()
+            losses["shape_warper"].append(loss_shape_warper.item())
+            losses["shape_warper_smooth"].append(loss_shape_warper_smooth.item())
+
+            pbar.set_description(f"int_warper: {loss_int_all.item():.4f}, shape_warper: {loss_shape_all.item():.4f}")
+
+        pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
+        # train VAE
+        for i, (X1, X2) in pbar:
+            X1, X2 = X1.float().to(self.device), X2.float().to(self.device)
+            Z1_mu, Z1_log_sigma, Z2_mu, Z2_log_sigma, \
+            X1_hat, X2_hat, X_int_interp_shape_1, X_int_interp_shape_2, X_int_1_shape_interp, X_int_2_shape_interp = \
+                self.vae(X1, X2)  # (B, lat_dim) for Z, (B, C, H, W) for X
+            loss_recons = (mse_loss(X1_hat, X1) + mse_loss(X2_hat, X2)) / 2
+            loss_kl = (-Z1_log_sigma - Z2_log_sigma - 0.5 * 2 +
+                       0.5 * ((2 * Z1_log_sigma).exp() + (2 * Z2_log_sigma).exp() + Z1_mu ** 2) + Z2_mu ** 2) / 2
+            loss_kl = loss_kl.mean()  # (B, lam_dim) -> float
+
+            # int_warper loss
+            log_s_1, t_1 = torch.chunk(self.int_warper(X_int_interp_shape_1, X1), 2, dim=1)  # (B, 1, H, W) each
+            X1_hat = X_int_interp_shape_1 * log_s_1.exp() + t_1  ### intensity warper: per pixel on all channels
+            log_s_2, t_2 = torch.chunk(self.int_warper(X_int_interp_shape_2, X2), 2, dim=1)
+            X2_hat = X_int_interp_shape_2 * log_s_2.exp() + t_2
+            loss_1 = mse_loss(X1_hat, X1)
+            loss_2 = mse_loss(X2_hat, X2)
+            loss_int_warper = (loss_1 + loss_2) / 2
+
+            # shape_warper loss
+            uv_1 = self.shape_warper(X_int_1_shape_interp, X1)  # (B, 2, H, W)
+            X1_hat = warp_optical_flow(X_int_1_shape_interp, uv_1.permute(0, 2, 3, 1))
+            uv_2 = self.shape_warper(X_int_2_shape_interp, X2)  # (B, 2, H, W)
+            X2_hat = warp_optical_flow(X_int_2_shape_interp, uv_2.permute(0, 2, 3, 1))
+            loss_1 = mse_loss(X1_hat, X1)
+            loss_2 = mse_loss(X2_hat, X2)
+            loss_shape_warper = (loss_1 + loss_2) / 2
+
+            loss_vae_all = loss_recons + loss_kl + self.lamda_warp_recons * (loss_int_warper + loss_shape_warper)
+            self.vae_optimizer.zero_grad()
+            loss_vae_all.backward()
+            self.vae_optimizer.step()
+            losses["recons"].append(loss_recons.item())
+            losses["kl"].append(loss_kl.item())
+            losses["int_warper_vae"].append(loss_int_warper.item())
+            losses["shape_warper_vae"].append(loss_shape_warper.item())
+
+            pbar.set_description(f"loss_all: {loss_vae_all.item():.4f}, recons: {loss_recons.item():.4f}, "
+                                 f"kl: {loss_kl.item():.4f}, int_warper: {loss_int_warper.item():.4f}, "
+                                 f"shape_warper: {loss_shape_warper.item():.4f}")
+
+    @torch.no_grad()
+    def _eval(self):
+        pass
+
+    def train(self):
+        pass
+
+    def _create_save_folder(self, model_save_dir=None):
+        """
+        This should be called at the root of the project. model_save_dir is the root folder:
+        model_save_dir/
+        -time_stamp_and_additional_info/
+        --model.pt (to save in self._save_latest_model(.))
+        """
+        assert model_save_dir is not None, "please specify a save directory"
+        if not os.path.isdir(model_save_dir):
+            os.mkdir(model_save_dir)
+        original_wd = os.getcwd()
+        os.chdir(model_save_dir)
+        time_stamp = f"{time.time()}".replace(".", "_")
+        os.mkdir(time_stamp)
+        os.chdir(original_wd)
+
+        return time_stamp
+
+    def _save_latest_model(self, time_stamp, epoch, eval_loss, model_save_dir=None):
+        assert model_save_dir is not None, "please specify a save directory"
+        original_wd = os.getcwd()
+        os.chdir(model_save_dir)
+        os.chdir(time_stamp)
+        # remove all old files
+        for filename in os.listdir():
+            if os.path.isfile(filename):
+                os.remove(filename)
+        # TODO: save 3 models
+        # filename = f"epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}".replace(".", "_") + ".pt"
+        # torch.save(self.model.state_dict(), filename)
+        os.chdir(original_wd)
+
+    def _eval_sample_plot(self):
+        # TODO
         pass

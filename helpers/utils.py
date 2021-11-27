@@ -1,5 +1,4 @@
 import os
-
 import cv2 as cv
 import numpy as np
 import matplotlib.pyplot as plt
@@ -181,3 +180,32 @@ def real_nvp_preprocess(x, dequantize=True, alpha=0.95, max_value=256, reverse=F
 def real_nvp_interpolation_grid(num_rows=5, num_cols=5):
     # TODO
     pass
+
+
+def compute_derivatives(X, win_size=5):
+    # X: (B, 1, H, W)
+    sobel, _ = cv.getDerivKernels(1, 1, win_size)
+    gaussian = cv.getGaussianKernel(win_size, -1).astype(np.float32)
+    deriv_x = sobel * gaussian.T
+    deriv_y = deriv_x.T
+    deriv_x, deriv_y = torch.FloatTensor(deriv_x), torch.FloatTensor(deriv_y)
+    Ix = F.conv2d(X, deriv_x.view(1, 1, *deriv_x.shape))  # (B, 1, H_valid, W_valid)
+    Iy = F.conv2d(X, deriv_y.view(1, 1, * deriv_y.shape))
+
+    return Ix, Iy
+
+
+def warp_optical_flow(X, flow):
+    # X: (B, C, H, W), flow: (B, H, W, 2)
+    B, C, H, W = X.shape
+    ### future version of PyTorch will make indexing="ij" default
+    yy, xx = torch.meshgrid(torch.arange(0, H), torch.arange(0, W))  # (H, W) each
+    xx = xx.float().to(X.device)
+    yy = yy.float().to(X.device)
+    flow[..., 0] += (xx - W / 2) / W * 2
+    flow[..., 1] += (yy - H / 2) / H * 2
+    # print(flow)
+
+    X_out = F.grid_sample(X, flow)
+
+    return X_out
