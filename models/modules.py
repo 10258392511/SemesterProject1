@@ -1,8 +1,10 @@
 import numpy as np
+import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
 
 from .utils import *
+from torchvision.utils import make_grid
 
 # U-Net
 ###################################################################
@@ -328,10 +330,10 @@ class MNISTDecoder(nn.Module):
 
 
 class Warper(nn.Module):
-    def __init__(self, lat_dim):
+    def __init__(self, lat_dim, in_channels=6):
         super(Warper, self).__init__()
         self.lat_dim = lat_dim
-        self.encoder = MNISTEncoder(6, lat_dim)
+        self.encoder = MNISTEncoder(in_channels, lat_dim)
         self.decoder = MNISTDecoder(lat_dim, 2)
 
     def forward(self, X1, X2):
@@ -382,3 +384,25 @@ class MNISTVAE(nn.Module):
 
         return Z1_mu, Z1_log_sigma, Z2_mu, Z2_log_sigma,\
                X1, X2, X_int_interp_shape_1, X_int_interp_shape_2, X_int_1_shape_interp, X_int_2_shape_interp
+
+    @torch.no_grad()
+    def interpolate(self, X1, X2, time_steps=5):
+        # X1, X2: (1, 3, 28, 28)
+        time_intervals = np.linspace(0, 1, time_steps)
+        samples = torch.zeros(time_steps, time_steps, *X1.shape[1:], dtype=X1.dtype)
+        X1 = 2 * X1 - 1
+        X2 = 2 * X2 - 1
+        Z1, _ = self.encoder(X1).chunk(2, dim=1)  # (1, lat_dim)
+        Z2, _ = self.encoder(X2).chunk(2, dim=1)
+        Z1_int, Z1_shape = Z1[:, :self.lat_split_ind], Z1[:, self.lat_split_ind:]
+        Z2_int, Z2_shape = Z2[:, :self.lat_split_ind], Z2[:, self.lat_split_ind:]
+        for t_row in range(time_steps):
+            for t_col in range(time_steps):
+                Z_int_interp = Z1_int + time_intervals[t_row] * (Z2_int - Z1_int)  # (1, lat_dim')
+                Z_shape_interp = Z1_shape + time_intervals[t_col] * (Z2_shape - Z1_shape)
+                X_interp = self.decoder(torch.cat([Z_int_interp, Z_shape_interp], dim=1))  # (1, 3, 28, 28)
+                samples[t_row, t_col] = X_interp[0]
+        samples = samples.view(-1, *X1.shape[1:])  # (time_step^2, 3, 28, 28)
+        samples_grid = make_grid(samples, nrow=time_steps)  # (C, H', W')
+        plt.imshow(samples_grid.permute(1, 2, 0).detach().cpu().numpy())
+        plt.show()

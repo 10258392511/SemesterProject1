@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import time
 
+from torchvision.utils import make_grid
 from torch_lr_finder import LRFinder
 from .utils import real_nvp_preprocess, compute_derivatives, warp_optical_flow
 
@@ -441,8 +442,8 @@ class RealNVPTrainer(object):
 class MNISTVAETrainer(object):
     def __init__(self, vae, int_warper, shape_warper, train_loader, eval_loader, vae_optimizer,
                  int_warper_optimizer, shape_warper_optimizer, lr_scheduler=None,
-                 epochs=20, warper_batch_portion=0.5, deriv_win_size=5, lamda_warper=1, lamda_warp_recons=1,
-                 device=None, notebook=True):
+                 epochs=20, warper_batch_portion=0.5, deriv_win_size=5, lamda_int_warper=1, lamda_shape_warper=1,
+                 lamda_warp_recons=1, device=None, notebook=True):
         self.vae = vae
         self.int_warper = int_warper
         self.shape_warper = shape_warper
@@ -457,7 +458,8 @@ class MNISTVAETrainer(object):
         self.notebook = notebook
         self.warper_batch_portion = warper_batch_portion
         self.deriv_win_size = deriv_win_size
-        self.lamda_warper = lamda_warper
+        self.lamda_int_warper = lamda_int_warper
+        self.lamda_shape_warper = lamda_shape_warper
         self.lamda_warp_recons = lamda_warp_recons
 
     def _train(self):
@@ -470,7 +472,8 @@ class MNISTVAETrainer(object):
             from tqdm import tqdm
         losses = dict(int_warper=[], shape_warper=[], int_warper_smooth=[], shape_warper_smooth=[],
                       recons=[], kl=[], int_warper_vae=[], shape_warper_vae=[])
-        mse_loss = nn.MSELoss()
+        # mse_loss = nn.MSELoss()
+        loss_type = "MSE"
         pbar = tqdm(enumerate(self.train_loader), total=int(len(self.train_loader) * self.warper_batch_portion),
                     desc="training", leave=False)
         # train warpers
@@ -487,17 +490,19 @@ class MNISTVAETrainer(object):
             X1_hat = X_int_interp_shape_1 * log_s_1.exp() + t_1  ### intensity warper: per pixel on all channels
             log_s_2, t_2 = torch.chunk(self.int_warper(X_int_interp_shape_2, X2), 2, dim=1)
             X2_hat = X_int_interp_shape_2 * log_s_2.exp() + t_2
-            loss_1 = mse_loss(X1_hat, X1)
-            loss_2 = mse_loss(X2_hat, X2)
+            # loss_1 = mse_loss(X1_hat, X1)
+            # loss_2 = mse_loss(X2_hat, X2)
+            loss_1 = self._compare_two_imgs(X1_hat, X1, loss_type)
+            loss_2 = self._compare_two_imgs(X2_hat, X2, loss_type)
             loss_int_warper = (loss_1 + loss_2) / 2
             loss_int_warper_smooth = 0
             for img in [log_s_1, t_1, log_s_2, t_2]:
                 Ix, Iy = compute_derivatives(img, win_size=self.deriv_win_size)  # (B, 1, H, W) each
-                loss_int_warper_smooth += (Ix ** 2).mean() + (Iy ** 2).mean()
+                loss_int_warper_smooth += torch.abs(Ix).sum(dim=1).mean() + torch.abs(Iy).sum(dim=1).mean()
             loss_int_warper_smooth /= 2
-            loss_int_all = loss_int_warper + self.lamda_warper * loss_int_warper_smooth
+            loss_int_all = loss_int_warper + self.lamda_int_warper * loss_int_warper_smooth
             self.int_warper_optimizer.zero_grad()
-            loss_int_all.backward()
+            loss_int_all.backward(retain_graph=True)
             self.int_warper_optimizer.step()
             losses["int_warper"].append(loss_int_warper.item())
             losses["int_warper_smooth"].append(loss_int_warper_smooth.item())
@@ -507,22 +512,26 @@ class MNISTVAETrainer(object):
             X1_hat = warp_optical_flow(X_int_1_shape_interp, uv_1.permute(0, 2, 3, 1))
             uv_2 = self.shape_warper(X_int_2_shape_interp, X2)  # (B, 2, H, W)
             X2_hat = warp_optical_flow(X_int_2_shape_interp, uv_2.permute(0, 2, 3, 1))
-            loss_1 = mse_loss(X1_hat, X1)
-            loss_2 = mse_loss(X2_hat, X2)
+            # loss_1 = mse_loss(X1_hat, X1)
+            # loss_2 = mse_loss(X2_hat, X2)
+            loss_1 = self._compare_two_imgs(X1_hat, X1, loss_type)
+            loss_2 = self._compare_two_imgs(X2_hat, X2, loss_type)
             loss_shape_warper = (loss_1 + loss_2) / 2
             loss_shape_warper_smooth = 0
             for img in [*uv_1.chunk(2, dim=1), *uv_2.chunk(2, dim=1)]:
                 Ix, Iy = compute_derivatives(img, win_size=self.deriv_win_size)  # (B, 1, H, W) each
-                loss_shape_warper_smooth += (Ix ** 2).mean() + (Iy ** 2).mean()
+                loss_shape_warper_smooth += torch.abs(Ix).sum(dim=1).mean() + torch.abs(Iy).sum(dim=1).mean()
             loss_shape_warper_smooth /= 2
-            loss_shape_all = loss_shape_warper + self.lamda_warper * loss_shape_warper_smooth
+            loss_shape_all = loss_shape_warper + self.lamda_shape_warper * loss_shape_warper_smooth
             self.shape_warper_optimizer.zero_grad()
             loss_shape_all.backward()
             self.shape_warper_optimizer.step()
             losses["shape_warper"].append(loss_shape_warper.item())
             losses["shape_warper_smooth"].append(loss_shape_warper_smooth.item())
 
-            pbar.set_description(f"int_warper: {loss_int_all.item():.4f}, shape_warper: {loss_shape_all.item():.4f}")
+            pbar.set_description(f"int_warper: {loss_int_all.item():.4f}, shape_warper: {loss_shape_all.item():.4f}, "
+                                 f"int_warper_smooth: {loss_int_warper_smooth.item():.4f}, "
+                                 f"shape_warper_smooth: {loss_shape_warper_smooth.item():.4f}")
 
         pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
         # train VAE
@@ -531,27 +540,32 @@ class MNISTVAETrainer(object):
             Z1_mu, Z1_log_sigma, Z2_mu, Z2_log_sigma, \
             X1_hat, X2_hat, X_int_interp_shape_1, X_int_interp_shape_2, X_int_1_shape_interp, X_int_2_shape_interp = \
                 self.vae(X1, X2)  # (B, lat_dim) for Z, (B, C, H, W) for X
-            loss_recons = (mse_loss(X1_hat, X1) + mse_loss(X2_hat, X2)) / 2
+            # loss_recons = (mse_loss(X1_hat, X1) + mse_loss(X2_hat, X2)) / 2
+            loss_recons = (self._compare_two_imgs(X1_hat, X1, loss_type) +
+                           self._compare_two_imgs(X2_hat, X2, loss_type)) / 2
             loss_kl = (-Z1_log_sigma - Z2_log_sigma - 0.5 * 2 +
                        0.5 * ((2 * Z1_log_sigma).exp() + (2 * Z2_log_sigma).exp() + Z1_mu ** 2) + Z2_mu ** 2) / 2
-            loss_kl = loss_kl.mean()  # (B, lam_dim) -> float
+            loss_kl = loss_kl.sum(dim=1).mean()  # (B, lam_dim) -> (B,) -> float
 
             # int_warper loss
             log_s_1, t_1 = torch.chunk(self.int_warper(X_int_interp_shape_1, X1), 2, dim=1)  # (B, 1, H, W) each
             X1_hat = X_int_interp_shape_1 * log_s_1.exp() + t_1  ### intensity warper: per pixel on all channels
             log_s_2, t_2 = torch.chunk(self.int_warper(X_int_interp_shape_2, X2), 2, dim=1)
             X2_hat = X_int_interp_shape_2 * log_s_2.exp() + t_2
-            loss_1 = mse_loss(X1_hat, X1)
-            loss_2 = mse_loss(X2_hat, X2)
+            # loss_1 = mse_loss(X1_hat, X1)
+            # loss_2 = mse_loss(X2_hat, X2)
+            loss_1 = self._compare_two_imgs(X1_hat, X1, loss_type)
+            loss_2 = self._compare_two_imgs(X2_hat, X2, loss_type)
             loss_int_warper = (loss_1 + loss_2) / 2
-
             # shape_warper loss
             uv_1 = self.shape_warper(X_int_1_shape_interp, X1)  # (B, 2, H, W)
             X1_hat = warp_optical_flow(X_int_1_shape_interp, uv_1.permute(0, 2, 3, 1))
             uv_2 = self.shape_warper(X_int_2_shape_interp, X2)  # (B, 2, H, W)
             X2_hat = warp_optical_flow(X_int_2_shape_interp, uv_2.permute(0, 2, 3, 1))
-            loss_1 = mse_loss(X1_hat, X1)
-            loss_2 = mse_loss(X2_hat, X2)
+            # loss_1 = mse_loss(X1_hat, X1)
+            # loss_2 = mse_loss(X2_hat, X2)
+            loss_1 = self._compare_two_imgs(X1_hat, X1, loss_type)
+            loss_2 = self._compare_two_imgs(X2_hat, X2, loss_type)
             loss_shape_warper = (loss_1 + loss_2) / 2
 
             loss_vae_all = loss_recons + loss_kl + self.lamda_warp_recons * (loss_int_warper + loss_shape_warper)
@@ -567,12 +581,123 @@ class MNISTVAETrainer(object):
                                  f"kl: {loss_kl.item():.4f}, int_warper: {loss_int_warper.item():.4f}, "
                                  f"shape_warper: {loss_shape_warper.item():.4f}")
 
+        return losses
+
     @torch.no_grad()
     def _eval(self):
-        pass
+        self.vae.eval()
+        self.int_warper.eval()
+        self.shape_warper.eval()
 
-    def train(self):
-        pass
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+
+        # mse_loss = nn.MSELoss()
+        loss_type = "MSE"
+        pbar = tqdm(enumerate(self.eval_loader), total=len(self.eval_loader), desc="validation", leave=False)
+        num_samples = 0
+        losses = dict(recons=0, kl=0, int_warper_vae=0, shape_warper_vae=0)
+        # train VAE
+        for i, (X1, X2) in pbar:
+            X1, X2 = X1.float().to(self.device), X2.float().to(self.device)
+            Z1_mu, Z1_log_sigma, Z2_mu, Z2_log_sigma, \
+            X1_hat, X2_hat, X_int_interp_shape_1, X_int_interp_shape_2, X_int_1_shape_interp, X_int_2_shape_interp = \
+                self.vae(X1, X2)  # (B, lat_dim) for Z, (B, C, H, W) for X
+            loss_recons = (self._compare_two_imgs(X1_hat, X1, loss_type) +
+                           self._compare_two_imgs(X2_hat, X2, loss_type)) / 2
+            loss_kl = (-Z1_log_sigma - Z2_log_sigma - 0.5 * 2 +
+                       0.5 * ((2 * Z1_log_sigma).exp() + (2 * Z2_log_sigma).exp() + Z1_mu ** 2) + Z2_mu ** 2) / 2
+            loss_kl = loss_kl.sum(dim=1).mean()  # (B, lam_dim) -> (B,) -> float
+
+            # int_warper loss
+            log_s_1, t_1 = torch.chunk(self.int_warper(X_int_interp_shape_1, X1), 2, dim=1)  # (B, 1, H, W) each
+            X1_hat = X_int_interp_shape_1 * log_s_1.exp() + t_1  ### intensity warper: per pixel on all channels
+            log_s_2, t_2 = torch.chunk(self.int_warper(X_int_interp_shape_2, X2), 2, dim=1)
+            X2_hat = X_int_interp_shape_2 * log_s_2.exp() + t_2
+            # loss_1 = mse_loss(X1_hat, X1)
+            # loss_2 = mse_loss(X2_hat, X2)
+            loss_1 = self._compare_two_imgs(X1_hat, X1, loss_type)
+            loss_2 = self._compare_two_imgs(X2_hat, X2, loss_type)
+            loss_int_warper = (loss_1 + loss_2) / 2
+
+            # shape_warper loss
+            uv_1 = self.shape_warper(X_int_1_shape_interp, X1)  # (B, 2, H, W)
+            X1_hat = warp_optical_flow(X_int_1_shape_interp, uv_1.permute(0, 2, 3, 1))
+            uv_2 = self.shape_warper(X_int_2_shape_interp, X2)  # (B, 2, H, W)
+            X2_hat = warp_optical_flow(X_int_2_shape_interp, uv_2.permute(0, 2, 3, 1))
+            # loss_1 = mse_loss(X1_hat, X1)
+            # loss_2 = mse_loss(X2_hat, X2)
+            loss_1 = self._compare_two_imgs(X1_hat, X1, loss_type)
+            loss_2 = self._compare_two_imgs(X2_hat, X2, loss_type)
+            loss_shape_warper = (loss_1 + loss_2) / 2
+
+            loss_vae_all = loss_recons + loss_kl + self.lamda_warp_recons * (loss_int_warper + loss_shape_warper)
+
+            pbar.set_description(f"loss_all: {loss_vae_all.item():.4f}, recons: {loss_recons.item():.4f}, "
+                                 f"kl: {loss_kl.item():.4f}, int_warper: {loss_int_warper.item():.4f}, "
+                                 f"shape_warper: {loss_shape_warper.item():.4f}")
+
+            losses["recons"] += loss_recons * X1.shape[0]
+            losses["kl"] += loss_kl * X1.shape[0]
+            losses["int_warper_vae"] += loss_int_warper * X1.shape[0]
+            losses["shape_warper_vae"] += loss_shape_warper * X1.shape[0]
+            num_samples += X1.shape[0]
+
+        for key in losses:
+            losses[key] /= num_samples
+
+        return losses
+
+    def _compare_two_imgs(self, X_hat, X, loss_func="MSE"):
+        assert loss_func in ["MSE", "CE"], "only support MSE and CE"
+        # X_hat, X: (B, 3, 28, 28), [0, 1]
+        if loss_func == "MSE":
+            loss = nn.MSELoss(reduction="none")
+            loss_mse = loss(X_hat, X).view(X.shape[0], -1)
+            return loss_mse.sum(dim=1).mean()
+        else:
+            # TODO: multi-channel output for CE
+            loss = nn.CrossEntropyLoss()
+            X = (X * 255).long()
+            return loss(X_hat, X)
+
+    def train(self, if_plot=True):
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
+
+        model_save_dir = "./params/vae_warper_mnist"
+        time_stamp = self._create_save_folder(model_save_dir=model_save_dir)
+        pbar = trange(self.epochs, desc="epochs")
+        train_losses, eval_losses = [], []
+        lowest_loss = float("inf")
+        for epoch in pbar:
+            train_loss = self._train()
+            eval_loss = self._eval()
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+            train_losses.append(train_loss)
+            eval_losses.append(eval_loss)
+            cur_loss = eval_loss["recons"] + eval_loss["kl"] + \
+                       self.lamda_warp_recons * (eval_loss["int_warper_vae"] + eval_loss["shape_warper_vae"])
+            if cur_loss < lowest_loss:
+                lowest_loss = cur_loss
+                self._save_latest_model(time_stamp, epoch, eval_loss, model_save_dir)
+
+            if if_plot:
+                print(f"epoch {epoch + 1}/{self.epochs}")
+                self._eval_sample_plot()
+                self._check_warper()
+
+            cur_train_loss = train_loss["recons"][-1] + train_loss["kl"][-1] + \
+                       self.lamda_warp_recons * (train_loss["int_warper_vae"][-1] + train_loss["shape_warper_vae"][-1])
+            pbar.set_description(f"epoch: {epoch + 1}/{self.epochs}: training loss: {cur_train_loss:.4f}, eval loss:"
+                                 f"{cur_loss:.4f}")
+
+        return train_losses, eval_losses
 
     def _create_save_folder(self, model_save_dir=None):
         """
@@ -593,6 +718,7 @@ class MNISTVAETrainer(object):
         return time_stamp
 
     def _save_latest_model(self, time_stamp, epoch, eval_loss, model_save_dir=None):
+        # eval_loss; dict
         assert model_save_dir is not None, "please specify a save directory"
         original_wd = os.getcwd()
         os.chdir(model_save_dir)
@@ -601,11 +727,66 @@ class MNISTVAETrainer(object):
         for filename in os.listdir():
             if os.path.isfile(filename):
                 os.remove(filename)
-        # TODO: save 3 models
-        # filename = f"epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}".replace(".", "_") + ".pt"
-        # torch.save(self.model.state_dict(), filename)
+        filename_common = f"epoch_{epoch + 1}"
+        for key in eval_loss:
+            filename_common += f"_{key}_{eval_loss[key]:.4f}"
+        filename_common = filename_common.replace(".", "_")
+        filename_common += ".pt"
+        torch.save(self.vae, "vae_" + filename_common)
+        torch.save(self.int_warper, "int_warper_" + filename_common)
+        torch.save(self.shape_warper, "shape_warper_" + filename_common)
         os.chdir(original_wd)
 
-    def _eval_sample_plot(self):
-        # TODO
-        pass
+    @torch.no_grad()
+    def _eval_sample_plot(self, time_steps=5):
+        X1, X2 = None, None
+        for X1, X2 in self.eval_loader:
+            # X1, X2: (B, 3, 28, 28)
+            break
+        fig, axes = plt.subplots(1, 2)
+        axes[0].imshow(X1[0, ...].permute(1, 2, 0).detach().cpu().numpy())
+        axes[1].imshow(X2[0, ...].permute(1, 2, 0).detach().cpu().numpy())
+        plt.show()
+
+        X1 = X1.to(self.device)
+        X2 = X2.to(self.device)
+        self.vae.interpolate(X1[0:1, ...], X2[0:1, ...], time_steps=time_steps)
+
+    @torch.no_grad()
+    def _check_warper(self):
+        X1, X2 = None, None
+        for X1, X2 in self.eval_loader:
+            # X1, X2: (B, 3, 28, 28)
+            break
+        X1 = X1.to(self.device)
+        X2 = X2.to(self.device)
+        # fig, axes = plt.subplots(1, 2)
+        # axes[0].imshow(X1[0, ...].permute(1, 2, 0).detach().cpu().numpy())
+        # axes[1].imshow(X2[0, ...].permute(1, 2, 0).detach().cpu().numpy())
+        # plt.show()
+
+        img1, img2 = X1[0:1, ...], X2[0:1, ...]  # (1, 3, 28, 28) each
+        _, _, _, _, \
+        X1, X2, X_int_interp_shape_1, X_int_interp_shape_2, X_int_1_shape_interp, X_int_2_shape_interp = self.vae(img1, img2)
+
+        log_s_1, t_1 = torch.chunk(self.int_warper(X_int_interp_shape_1, X1), 2, dim=1)  # (B, 1, H, W) each
+        X1_hat_int = X_int_interp_shape_1 * log_s_1.exp() + t_1  ### intensity warper: per pixel on all channels
+        log_s_2, t_2 = torch.chunk(self.int_warper(X_int_interp_shape_2, X2), 2, dim=1)
+        X2_hat_int = X_int_interp_shape_2 * log_s_2.exp() + t_2
+
+        uv_1 = self.shape_warper(X_int_1_shape_interp, X1)  # (B, 2, H, W)
+        X1_hat_shape = warp_optical_flow(X_int_1_shape_interp, uv_1.permute(0, 2, 3, 1))
+        uv_2 = self.shape_warper(X_int_2_shape_interp, X2)  # (B, 2, H, W)
+        X2_hat_shape = warp_optical_flow(X_int_2_shape_interp, uv_2.permute(0, 2, 3, 1))
+
+        img_grid = torch.cat([img1, img2, X1, X2, X_int_interp_shape_1, X_int_interp_shape_2,
+                              X_int_1_shape_interp, X_int_2_shape_interp, X1_hat_int, X2_hat_int,
+                              X1_hat_shape, X2_hat_shape], dim=0)
+        warper_grid = torch.cat([log_s_1, t_1, log_s_2, t_2, *uv_1.chunk(2, dim=1), *uv_2.chunk(2, dim=1)], dim=0)
+        img_grid = make_grid(img_grid, nrow=2)
+        warper_grid = make_grid(warper_grid, nrow=2)
+        plt.imshow(img_grid.permute(1, 2, 0).detach().cpu().numpy())
+        plt.show()
+        plt.imshow(warper_grid[0].detach().cpu().numpy(), cmap="gray")  # (1, H', W')
+        plt.colorbar()
+        plt.show()

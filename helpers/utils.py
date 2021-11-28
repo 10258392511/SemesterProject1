@@ -188,14 +188,14 @@ def compute_derivatives(X, win_size=5):
     gaussian = cv.getGaussianKernel(win_size, -1).astype(np.float32)
     deriv_x = sobel * gaussian.T
     deriv_y = deriv_x.T
-    deriv_x, deriv_y = torch.FloatTensor(deriv_x), torch.FloatTensor(deriv_y)
+    deriv_x, deriv_y = torch.FloatTensor(deriv_x).to(X.device), torch.FloatTensor(deriv_y).to(X.device)
     Ix = F.conv2d(X, deriv_x.view(1, 1, *deriv_x.shape))  # (B, 1, H_valid, W_valid)
     Iy = F.conv2d(X, deriv_y.view(1, 1, * deriv_y.shape))
 
     return Ix, Iy
 
 
-def warp_optical_flow(X, flow):
+def warp_optical_flow(X, flow, if_normalize=True):
     # X: (B, C, H, W), flow: (B, H, W, 2)
     B, C, H, W = X.shape
     ### future version of PyTorch will make indexing="ij" default
@@ -204,6 +204,8 @@ def warp_optical_flow(X, flow):
     yy = yy.float().to(X.device)
     flow[..., 0] += (xx - W / 2) / W * 2
     flow[..., 1] += (yy - H / 2) / H * 2
+    if if_normalize:
+        flow = torch.tanh(flow)
     # print(flow)
 
     X_out = F.grid_sample(X, flow)
