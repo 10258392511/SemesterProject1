@@ -382,8 +382,8 @@ class MNISTVAE(nn.Module):
     def forward(self, X1, X2):
         # X1, X2: (B, 3, 28, 28) each
         # reconstruction
-        X1 = 2 * X1 - 1
-        X2 = 2 * X2 - 1
+        # X1 = 2 * X1 - 1
+        # X2 = 2 * X2 - 1
         Z1_mu, Z1_log_sigma = torch.chunk(self.encoder(X1), 2, dim=1)  # (B, lat_dim) each
         Z2_mu, Z2_log_sigma = torch.chunk(self.encoder(X2), 2, dim=1)
         Z1 = Z1_mu + torch.randn_like(Z1_mu) * Z1_log_sigma.exp()
@@ -414,8 +414,8 @@ class MNISTVAE(nn.Module):
         # X1, X2: (1, 3, 28, 28)
         time_intervals = np.linspace(0, 1, time_steps)
         samples = torch.zeros(time_steps, time_steps, *X1.shape[1:], dtype=X1.dtype)
-        X1 = 2 * X1 - 1
-        X2 = 2 * X2 - 1
+        # X1 = 2 * X1 - 1
+        # X2 = 2 * X2 - 1
         Z1, _ = self.encoder(X1).chunk(2, dim=1)  # (1, lat_dim)
         Z2, _ = self.encoder(X2).chunk(2, dim=1)
         Z1_int, Z1_shape = Z1[:, :self.lat_split_ind], Z1[:, self.lat_split_ind:]
