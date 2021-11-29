@@ -182,15 +182,22 @@ def real_nvp_interpolation_grid(num_rows=5, num_cols=5):
     pass
 
 
-def compute_derivatives(X, win_size=5):
-    # X: (B, 1, H, W)
+def compute_derivatives(X, win_size=5, if_cross_entropy=False):
+    # X: (B, 1, H, W) or (B, K, H, W)
     sobel, _ = cv.getDerivKernels(1, 1, win_size)
     gaussian = cv.getGaussianKernel(win_size, -1).astype(np.float32)
     deriv_x = sobel * gaussian.T
     deriv_y = deriv_x.T
     deriv_x, deriv_y = torch.FloatTensor(deriv_x).to(X.device), torch.FloatTensor(deriv_y).to(X.device)
-    Ix = F.conv2d(X, deriv_x.view(1, 1, *deriv_x.shape))  # (B, 1, H_valid, W_valid)
-    Iy = F.conv2d(X, deriv_y.view(1, 1, * deriv_y.shape))
+    if not if_cross_entropy:
+        Ix = F.conv2d(X, deriv_x.view(1, 1, *deriv_x.shape))  # (B, 1, H_valid, W_valid)
+        Iy = F.conv2d(X, deriv_y.view(1, 1, * deriv_y.shape))
+    else:
+        # (B, K, H, W) -> (B, 1, K, H, W)
+        X = X.unsqueeze(1)
+        # kernel: (1, 1, 1, H', W'), out: (B, 1, K, H_valid, W_valid) -> (B, K, H_valid, W_valid)
+        Ix = F.conv3d(X, deriv_x.view(1, 1, 1, *deriv_x.shape)).squeeze()
+        Iy = F.conv3d(X, deriv_y.view(1, 1, 1, *deriv_y.shape)).squeeze()
 
     return Ix, Iy
 

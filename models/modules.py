@@ -329,12 +329,34 @@ class MNISTDecoder(nn.Module):
         return X
 
 
-class Warper(nn.Module):
-    def __init__(self, lat_dim, in_channels=6):
-        super(Warper, self).__init__()
+class IntWarper(nn.Module):
+    def __init__(self, lat_dim, if_cross_entropy=False):
+        super(IntWarper, self).__init__()
         self.lat_dim = lat_dim
+        self.if_cross_entropy = if_cross_entropy
+        in_channels = 3 * 256 + 3 if if_cross_entropy else 6
         self.encoder = MNISTEncoder(in_channels, lat_dim)
-        self.decoder = MNISTDecoder(lat_dim, 2)
+        out_channels = 256 if if_cross_entropy else 2
+        self.decoder = MNISTDecoder(lat_dim, out_channels)
+
+    def forward(self, X1, X2):
+        # X1, X2: (B, C, H, W) each
+        X = torch.cat([X1, X2], dim=1)  # (B, 2 * C, H, W) or (B, K * C + C, H, W)
+        Z = self.encoder(X)  # (B, lat_dim)
+        warp_field = self.decoder(Z)  # (B, 2, H, W) or (B, K, H, W)
+
+        return warp_field
+
+
+class ShapeWarper(nn.Module):
+    def __init__(self, lat_dim, if_cross_entropy=False):
+        super(ShapeWarper, self).__init__()
+        self.lat_dim = lat_dim
+        self.if_cross_entropy = if_cross_entropy
+        in_channels = 3 * 256 + 3 if if_cross_entropy else 6
+        self.encoder = MNISTEncoder(in_channels, lat_dim)
+        out_channels = 2
+        self.decoder = MNISTDecoder(lat_dim, out_channels)
 
     def forward(self, X1, X2):
         # X1, X2: (B, C, H, W) each
@@ -346,14 +368,16 @@ class Warper(nn.Module):
 
 
 class MNISTVAE(nn.Module):
-    def __init__(self, lat_dim, lat_split_ind, device=None):
+    def __init__(self, lat_dim, lat_split_ind, if_cross_entropy=False, device=None):
         assert 0 <= lat_split_ind < lat_dim, "invalid lat_split_ind"
         super(MNISTVAE, self).__init__()
         self.lat_dim = lat_dim
         self.lat_split_ind = lat_split_ind
         self.device = device if device is not None else torch.device("cuda")
         self.encoder = MNISTEncoder(3, 2 * lat_dim)
-        self.decoder = MNISTDecoder(lat_dim, 3)
+        self.if_cross_entropy = if_cross_entropy
+        out_channels = 3 * 256 if if_cross_entropy else 3
+        self.decoder = MNISTDecoder(lat_dim, out_channels)
 
     def forward(self, X1, X2):
         # X1, X2: (B, 3, 28, 28) each
@@ -400,9 +424,15 @@ class MNISTVAE(nn.Module):
             for t_col in range(time_steps):
                 Z_int_interp = Z1_int + time_intervals[t_row] * (Z2_int - Z1_int)  # (1, lat_dim')
                 Z_shape_interp = Z1_shape + time_intervals[t_col] * (Z2_shape - Z1_shape)
-                X_interp = self.decoder(torch.cat([Z_int_interp, Z_shape_interp], dim=1))  # (1, 3, 28, 28)
+                if not self.if_cross_entropy:
+                    X_interp = self.decoder(torch.cat([Z_int_interp, Z_shape_interp], dim=1))  # (1, 3, 28, 28)
+                else:
+                    X_interp = self.decoder(torch.cat([Z_int_interp, Z_shape_interp], dim=1))  # (1, 3 * 256, 28, 28)
+                    X_interp = X_interp.view(1, 3, 256, 28, 28)
+                    X_interp = torch.argmax(X_interp, dim=2).float() / 255
                 samples[t_row, t_col] = X_interp[0]
         samples = samples.view(-1, *X1.shape[1:])  # (time_step^2, 3, 28, 28)
         samples_grid = make_grid(samples, nrow=time_steps)  # (C, H', W')
         plt.imshow(samples_grid.permute(1, 2, 0).detach().cpu().numpy())
+        # plt.colorbar()
         plt.show()
