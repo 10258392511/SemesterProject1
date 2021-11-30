@@ -336,10 +336,12 @@ class RealNVPTrainer(object):
         pbar = tqdm(enumerate(self.train_loader), desc="training", total=len(self.train_loader), leave=False)
         losses = []
         for i, (X, _) in pbar:
+            if i > 25:
+                break
             X = X.float().to(self.device) * 255  # [0, 255]
             X, log_det = real_nvp_preprocess(X)  # (B, C, H, W), (B,)
             log_prob_model = self.model.log_prob(X)
-            loss = -(log_prob_model + log_det)
+            loss = -(log_prob_model + log_det).mean()
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
@@ -359,13 +361,15 @@ class RealNVPTrainer(object):
         num_samples = 0
         loss_avg = 0
         for i, (X, _) in pbar:
+            if i > 10:
+                break
             X = X.float().to(self.device) * 255  # [0, 255]
             X, log_det = real_nvp_preprocess(X)  # (B, C, H, W), (B,)
             log_prob_model = self.model.log_prob(X)
-            loss = -(log_prob_model + log_det)
+            loss = -(log_prob_model + log_det).mean()
             loss_avg += loss * X.shape[0]
             num_samples += X.shape[0]
-            pbar.set_description(f"batch {i + 1}/{len(self.eval_loader)}: eval loss: {loss.item:.4f}")
+            pbar.set_description(f"batch {i + 1}/{len(self.eval_loader)}: eval loss: {loss.item():.4f}")
 
         return loss_avg / num_samples
 
@@ -398,8 +402,9 @@ class RealNVPTrainer(object):
             pbar.set_description(f"epoch: {epoch + 1}/{self.epochs}, training loss: {train_loss[-1]:.4f}, "
                                  f"eval loss: {eval_loss[-1]:.4f}")
         if if_plot:
-            # TODO
             self._eval_sample_plot()
+
+        return train_losses, eval_losses
 
     def _create_save_folder(self, model_save_dir=None):
         """
@@ -432,10 +437,16 @@ class RealNVPTrainer(object):
         torch.save(self.model.state_dict(), filename)
         os.chdir(original_wd)
 
+    @torch.no_grad()
     def _eval_sample_plot(self):
-        # TODO: implementation
-        pass
-
+        X = None
+        for (X, _) in self.eval_loader:
+            break
+        sample = self.model.sample(1, X.shape[1:])
+        sample_img, _ = real_nvp_preprocess(sample, if_reverse=True)  # (1, C, H, W)
+        plt.imshow(sample_img[0, 0], cmap="gray")
+        plt.colorbar()
+        plt.show()
 
 ######################################################################
 ## MNISTVAETrainer ##
