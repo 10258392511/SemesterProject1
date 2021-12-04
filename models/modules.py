@@ -436,3 +436,27 @@ class MNISTVAE(nn.Module):
         plt.imshow(samples_grid.permute(1, 2, 0).detach().cpu().numpy())
         # plt.colorbar()
         plt.show()
+
+
+# Normalizer
+###################################################################
+class Normalizer(nn.Module):
+    def __init__(self, num_layers=3, kernel_size=1, in_channels=1, intermediate_channels=16):
+        assert kernel_size % 2 == 1, "kernel_size must be odd"
+        super(Normalizer, self).__init__()
+        self.num_layers = num_layers
+        self.kernel_size = kernel_size
+        self.in_channels = in_channels
+        self.intermediate_channels = intermediate_channels
+        padding = (kernel_size - 1) // 2
+        layers = [nn.Conv2d(in_channels, intermediate_channels, kernel_size, padding=padding)]
+        for _ in range(num_layers - 1):
+            layers += [nn.ReLU(),
+                       nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size, padding=padding)]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+
+        # x_out: (B, C, H, W)
+        return self.layers(x)

@@ -856,3 +856,7 @@ class MNISTVAETrainer(object):
         plt.imshow(warper_grid[0].detach().cpu().numpy(), cmap="gray")  # (1, H', W')
         plt.colorbar()
         plt.show()
+
+
+######################################################################
+## Normalizer + U-Net Trainer ##

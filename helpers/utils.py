@@ -4,6 +4,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import torch.nn.functional as F
+import albumentations as A
+import random
 
 from torchvision.utils import make_grid
 
@@ -218,3 +220,9 @@ def warp_optical_flow(X, flow, if_normalize=True):
     X_out = F.grid_sample(X, flow)
 
     return X_out
+
+
+def get_transforms():
+    options = [A.Flip(), A.ElasticTransform(alpha=50, alpha_affine=10)]
+
+    return options

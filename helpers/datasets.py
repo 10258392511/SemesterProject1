@@ -2,10 +2,14 @@ import numpy as np
 import cv2 as cv
 import torch
 import matplotlib.pyplot as plt
+import csv
+import nibabel as nib
+import albumentations as A
+import os
 
 from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import MNIST
-from torchvision.transforms import ToTensor
+from torchvision.transforms import ToTensor, Resize
 from albumentations import BasicTransform, Compose
 from .utils import convert_mask
 
@@ -100,4 +104,134 @@ class ColorMNIST(Dataset):
         fig, axes = plt.subplots(1, 2)
         axes[0].imshow(img1.permute(1, 2, 0))
         axes[1].imshow(img2.permute(1, 2, 0))
+        plt.show()
+
+
+class MnMsDataset(Dataset):
+    def __init__(self, source_name, data_path_root, transforms: list, mode,
+                 gamma_limit=(50, 150), target_size=(256, 256)):
+        assert mode in ["train", "eval", "test"], "mode should be 'train', 'eval' or 'test'"
+        assert source_name.lower() in ["csf", "hvhd", "uhe"], "invalid source name"
+        super(MnMsDataset, self).__init__()
+        self.source_name = source_name
+        self.data_path_root = data_path_root
+        self.csv_path = os.path.join(data_path_root, f"mnms_{source_name.lower()}.csv")
+        self.patient_info = {}
+        self.patient_id = []
+        self.mode = mode
+        self.transforms = transforms  # TODO: experiment on different combination of augmentations
+        self.split_info = {"csf": {"train": 31, "eval": 41},
+                           "hvhd": {"train": 56, "eval": 66},
+                           "uhe": {"train": 11, "eval": 16}}
+        self.gamma_limit = gamma_limit
+        self.target_size = target_size
+        self._read_patient_info()
+        self.num_samples = []
+        self._compute_num_samples()
+
+    def _read_patient_info(self):
+        with open(self.csv_path, "r", newline="") as rf:
+            csv_reader = csv.reader(rf, delimiter=",", quotechar="|")
+            for i, row in enumerate(csv_reader):
+                if self.mode == "train":
+                    if i <= self.split_info[self.source_name]["train"]:
+                        self.patient_info[row[0]] = {"ED": int(row[1]), "ES": int(row[2])}
+                    else:
+                        break
+
+                elif self.mode == "eval":
+                    if self.split_info[self.source_name]["train"] < i <= self.split_info[self.source_name]["eval"]:
+                        self.patient_info[row[0]] = {"ED": int(row[1]), "ES": int(row[2])}
+                    elif i > self.split_info[self.source_name]["eval"]:
+                        break
+
+                else:
+                    if i > self.split_info[self.source_name]["eval"]:
+                        self.patient_info[row[0]] = {"ED": int(row[1]), "ES": int(row[2])}
+
+                self.patient_id = list(self.patient_info.keys())
+
+    def _compute_num_samples(self):
+        # read in all data and document filename
+        for patient_id in self.patient_info:
+            directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
+            img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
+            # mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
+            img_data = nib.load(img_path)
+            # mask_data = nib.load(mask_path)
+            img_data_array = img_data.get_fdata()
+            # mask_data_array = mask_data.get_fdata()
+            H, W, D, T = img_data.shape
+            self.num_samples.append(2 * D)
+
+    def __len__(self):
+        return sum(self.num_samples)
+
+    def __getitem__(self, index):
+        assert 0 <= index < self.__len__(), "invalid index"
+        # img, mask = self.eval_test_array["image"][index, ...], self.eval_test_array["mask"][index, ...]
+        counter = index
+        img, mask, t, img_data_array, mask_data_array = None, None, None, None, None
+        for i, patient_id in enumerate(self.patient_id):
+            num_samples = self.num_samples[i]
+            if counter < num_samples:
+                directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
+                img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
+                mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
+                img_data = nib.load(img_path)
+                mask_data = nib.load(mask_path)
+                img_data_array = img_data.get_fdata()
+                mask_data_array = mask_data.get_fdata()
+                H, W, D, T = img_data_array.shape
+                img_data_array = (img_data_array / 255.).astype(np.float32)
+                ed, es = self.patient_info[patient_id]["ED"], self.patient_info[patient_id]["ES"]
+                if counter < D:
+                    img, mask = img_data_array[..., counter, ed], mask_data_array[..., counter, ed]
+                    t = ed
+                else:
+                    counter -= D
+                    img, mask = img_data_array[..., counter - D, es], mask_data_array[..., counter, es]
+                    t = es
+                break
+            counter -= num_samples
+
+        if self.mode == "train":
+            H, W, D, T = img_data_array.shape
+            another_t = np.random.randint(T)
+            while another_t == t:
+                another_t = np.random.randint(T)
+            img1 = img_data_array[..., counter, another_t]
+            # self.plot_triple(img, img1, mask)
+            transform = A.Compose(self.transforms, additional_targets={"image1": "image"})
+            transformed = transform(image=img, mask=mask, image1=img1)
+            img, mask, img1 = transformed["image"], transformed["mask"], transformed["image1"]
+            # self.plot_triple(img, img1, mask)
+
+            gamma_transform = A.RandomGamma(gamma_limit=self.gamma_limit, always_apply=True)
+            img1 = gamma_transform(image=img1)["image"]
+
+            cropper = A.Compose([A.RandomResizedCrop(height=self.target_size[0],
+                                                     width=self.target_size[1], always_apply=True)],
+                                additional_targets={"image1": "image"})
+            transformed = cropper(image=img, mask=mask, image1=img1)
+            img, mask, img1 = transformed["image"], transformed["mask"], transformed["image1"]
+
+            return torch.FloatTensor(img).unsqueeze(0), torch.FloatTensor(img1).unsqueeze(0), \
+                           torch.LongTensor(mask).unsqueeze(0)
+
+        else:
+            resizer = A.Resize(*self.target_size, always_apply=True)
+            transformed = resizer(image=img, mask=mask)
+            img, mask = transformed["image"], transformed["mask"]
+
+            return torch.FloatTensor(img).unsqueeze(0), torch.LongTensor(mask).unsqueeze(0)
+
+    def plot_triple(self, img, img1, mask, figsize=None):
+        figsize = plt.rcParams["figure.figsize"] if figsize is None else figsize
+        fig, axes = plt.subplots(1, 3, figsize=figsize)
+        imgs = [img, img1, mask]
+        for i, img_iter in enumerate(imgs):
+            handle = axes[i].imshow(img_iter, cmap="gray")
+            plt.colorbar(handle, ax=axes[i], fraction=0.1)
+        fig.tight_layout()
         plt.show()
