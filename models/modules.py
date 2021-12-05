@@ -453,6 +453,7 @@ class Normalizer(nn.Module):
         for _ in range(num_layers - 1):
             layers += [nn.ReLU(),
                        nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size, padding=padding)]
+        layers += [nn.ReLU(), nn.Conv2d(intermediate_channels, 1, kernel_size, padding=padding)]
         self.layers = nn.Sequential(*layers)
 
     def forward(self, x):

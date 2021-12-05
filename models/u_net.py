@@ -32,6 +32,7 @@ class Encoder(nn.Module):
 
     def forward(self, x):
         before_pools = []
+        # print(x.shape)
         x = self.conv_in(x)
         before_pools.append(x)
         for block in self.blocks:

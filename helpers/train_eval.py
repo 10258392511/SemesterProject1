@@ -9,8 +9,7 @@ import time
 from torchvision.utils import make_grid
 from torch_lr_finder import LRFinder
 from .utils import real_nvp_preprocess, compute_derivatives, warp_optical_flow
-from .losses import cross_entropy_loss, dice_loss, symmetric_loss
-from ..models.modules import Normalizer
+from .losses import mask_to_one_hot, cross_entropy_loss, dice_loss, symmetric_loss
 
 
 def lr_search(model, criterion, optimizer, train_loader, end_lr=1, device=None):
@@ -862,6 +861,30 @@ class MNISTVAETrainer(object):
 
 ######################################################################
 ## Normalizer + U-Net Trainer ##
+# This is a copy
+class Normalizer(nn.Module):
+    def __init__(self, num_layers=3, kernel_size=1, in_channels=1, intermediate_channels=16):
+        assert kernel_size % 2 == 1, "kernel_size must be odd"
+        super(Normalizer, self).__init__()
+        self.num_layers = num_layers
+        self.kernel_size = kernel_size
+        self.in_channels = in_channels
+        self.intermediate_channels = intermediate_channels
+        padding = (kernel_size - 1) // 2
+        layers = [nn.Conv2d(in_channels, intermediate_channels, kernel_size, padding=padding)]
+        for _ in range(num_layers - 1):
+            layers += [nn.ReLU(),
+                       nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size, padding=padding)]
+        layers += [nn.ReLU(), nn.Conv2d(intermediate_channels, 1, kernel_size, padding=padding)]
+        self.layers = nn.Sequential(*layers)
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+
+        # x_out: (B, C, H, W)
+        return self.layers(x)
+
+
 class AlternatingTrainer(object):
     def __init__(self, normalizer, u_net, train_loader, eval_loader, test_loader,
                  norm_optimizer, u_net_optimizer, lr_scheduler=None,
@@ -891,6 +914,14 @@ class AlternatingTrainer(object):
         pbar = tqdm(enumerate(self.train_loader), desc="training", total=len(self.train_loader), leave=False)
         losses = {"norm": [], "seg-main": [], "seg-smooth": [], "seg-all": []}
         for i, (X, X_aug, mask) in pbar:
+            ###########
+            # TODO: Comment out
+            if i >= 2:
+                break
+            ##########
+            X = (2 * X - 1).float().to(self.device)
+            X_aug = (2 * X_aug).float().to(self.device)
+            mask = mask.to(self.device)
             # update U-Net
             self.normalizer.eval()
             self.u_net.train()
@@ -926,9 +957,9 @@ class AlternatingTrainer(object):
             losses["norm"].append(loss_main.item())
 
             pbar.set_description(f"training batch: {i + 1}/{len(self.train_loader)}: norm: {losses['norm'][-1]:.4f}, "
-                                 f"loss-main: {losses['loss-main'][-1]:.4f}, "
-                                 f"loss-smooth: {losses['loss-smooth'][-1]:.4f}, "
-                                 f"loss-all: {losses['loss-all'][-1]:.4f}")
+                                 f"loss-main: {losses['seg-main'][-1]:.4f}, "
+                                 f"loss-smooth: {losses['seg-smooth'][-1]:.4f}, "
+                                 f"loss-all: {losses['seg-all'][-1]:.4f}")
 
         return losses
 
@@ -949,11 +980,19 @@ class AlternatingTrainer(object):
             from tqdm.notebook import tqdm
         else:
             from tqdm import tqdm
-        pbar = tqdm(enumerate(data_loader), desc="training", total=len(data_loader), leave=False)
+        pbar = tqdm(enumerate(data_loader), desc=f"{loader}", total=len(data_loader), leave=False)
         num_samples = 0
         loss_acc = 0
 
         for i, (X, mask) in pbar:
+            ###########
+            # TODO: Comment out
+            if i >= 2:
+                break
+            ##########
+            X = (2 * X - 1).float().to(self.device)
+            mask = mask.to(self.device)
+
             X_norm = self.normalizer(X)
             mask_pred = self.u_net(X_norm)
             loss = self.loss_fn(mask_pred, mask)
@@ -975,6 +1014,7 @@ class AlternatingTrainer(object):
         train_losses = {"norm": [], "seg-main": [], "seg-smooth": [], "seg-all": []}
         eval_losses = {"seg-all": []}
         for epoch in pbar:
+            # # TODO: uncomment
             train_loss = self._train()
             eval_loss = self.eval()
             if self.lr_scheduler is not None:
@@ -996,18 +1036,23 @@ class AlternatingTrainer(object):
                                 self.normalizer.intermediate_channels).to(self.device)
         normalizer.load_state_dict(self.normalizer.state_dict())
         norm_optimizer = torch.optim.Adam(normalizer.parameters())
-        test_time_adapter = TestTimeAdapter(normalizer, self.u_net, norm_optimizer, self.loss_type)
+        test_time_adapter = TestTimeAdapter(normalizer, self.u_net, norm_optimizer, self.loss_type, device=self.device)
         img_ind = np.random.randint(len(self.test_loader.dataset))
-        X = self.test_loader.dataset[img_ind].unsqueeze(0)  # (1, H, W) -> (1, 1, H, W)
-        mask_pred, loss = test_time_adapter.predict(X)  # (1, H, W)
+        X, mask_gt = self.test_loader.dataset[img_ind]  # (1, H, W), (1, H, W)
+        # (1, H, W) -> (1, 1, H, W)
+        X = X.unsqueeze(0)
+        mask_pred, loss = test_time_adapter.predict(X)  # (1, H, W) -> (1, 1, H, W)
+        # print(mask_pred.shape)
+        loss_gt = dice_loss(mask_to_one_hot(mask_pred.unsqueeze(0), self.num_classes), mask_gt.unsqueeze(0),
+                            if_soft_max=False)
 
         figsize = plt.rcParams["figure.figsize"] if figsize is None else figsize
-        fig, axes = plt.subplots(1, 2, figsize=figsize)
-        imgs = [X.detach().cpu().numpy()[0, 0], mask_pred[0]]
+        fig, axes = plt.subplots(1, 3, figsize=figsize)
+        imgs = [X.detach().cpu().numpy()[0, 0], mask_pred[0], mask_gt[0]]
         for axis, img in zip(axes, imgs):
             handle = axis.imshow(img, cmap="gray")
             plt.colorbar(handle, ax=axis)
-        plt.suptitle(f"loss: {loss}")
+        plt.suptitle(f"loss: {loss:.4f}, loss_gt: {loss_gt.item():.4f}")
         fig.tight_layout()
         plt.show()
 
@@ -1048,13 +1093,14 @@ class AlternatingTrainer(object):
 
 
 class TestTimeAdapter(object):
-    def __init__(self, normalizer, u_net, norm_optimizer, loss_type):
+    def __init__(self, normalizer, u_net, norm_optimizer, loss_type, device=None):
         assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
         self.normalizer = normalizer
         self.u_net = u_net
         self.norm_optimizer = norm_optimizer
         self.loss_type = loss_type
         self.loss_fn = cross_entropy_loss if loss_type == "CE" else dice_loss
+        self.device = torch.device("cuda") if device is None else device
 
     def predict(self, X, rel_eps=0.05, max_iters=15):
         # X: (1, 1, H, W)
@@ -1079,12 +1125,13 @@ class TestTimeAdapter(object):
         mask_pred = self.u_net(X_norm).argmax(dim=1)
 
         # mask_pred: (1, K, H, W) -> (1, H, W)
-        return mask_pred.detach().cpu().numpy(), cur_loss
+        return mask_pred.detach().cpu(), cur_loss
 
     def _compute_loss(self, X):
         # X: (1, 1, H, W)
+        X = (2 * X - 1).float().to(self.device)
         X_norm = self.normalizer(X)
-        mask_pred = self.u_net(X)
+        mask_pred = self.u_net(X)  # (B, K, H, W)
         mask_norm_pred = self.u_net(X_norm)
         loss = symmetric_loss(mask_pred, mask_norm_pred, self.loss_fn)
 
