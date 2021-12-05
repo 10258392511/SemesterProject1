@@ -216,6 +216,7 @@ class MnMsDataset(Dataset):
             transformed = cropper(image=img, mask=mask, image1=img1)
             img, mask, img1 = transformed["image"], transformed["mask"], transformed["image1"]
 
+            # (1, H, W), (1, H, W), (1, H, W)
             return torch.FloatTensor(img).unsqueeze(0), torch.FloatTensor(img1).unsqueeze(0), \
                            torch.LongTensor(mask).unsqueeze(0)
 

@@ -9,6 +9,8 @@ import time
 from torchvision.utils import make_grid
 from torch_lr_finder import LRFinder
 from .utils import real_nvp_preprocess, compute_derivatives, warp_optical_flow
+from .losses import cross_entropy_loss, dice_loss, symmetric_loss
+from ..models.modules import Normalizer
 
 
 def lr_search(model, criterion, optimizer, train_loader, end_lr=1, device=None):
@@ -860,3 +862,230 @@ class MNISTVAETrainer(object):
 
 ######################################################################
 ## Normalizer + U-Net Trainer ##
+class AlternatingTrainer(object):
+    def __init__(self, normalizer, u_net, train_loader, eval_loader, test_loader,
+                 norm_optimizer, u_net_optimizer, lr_scheduler=None,
+                 epochs=20, device=None, notebook=True, loss_type="DSC", num_classes=4, smooth_weight=1):
+        assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
+        self.normalizer = normalizer
+        self.u_net = u_net
+        self.train_loader = train_loader
+        self.eval_loader = eval_loader
+        self.test_loader = test_loader
+        self.norm_optimizer = norm_optimizer
+        self.u_net_optimizer = u_net_optimizer
+        self.lr_scheduler = lr_scheduler
+        self.epochs = epochs
+        self.device = torch.device("cuda") if device is None else device
+        self.notebook = notebook
+        self.loss_type = loss_type
+        self.loss_fn = cross_entropy_loss if loss_type == "CE" else dice_loss
+        self.num_classes = num_classes
+        self.smooth_weight = smooth_weight
+
+    def _train(self):
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.train_loader), desc="training", total=len(self.train_loader), leave=False)
+        losses = {"norm": [], "seg-main": [], "seg-smooth": [], "seg-all": []}
+        for i, (X, X_aug, mask) in pbar:
+            # update U-Net
+            self.normalizer.eval()
+            self.u_net.train()
+            mask_pred = self.u_net(X)  # (B, K, H, W)
+            loss_main = self.loss_fn(mask_pred, mask)
+            X_norm = self.normalizer(X)
+            mask_pred_norm = self.u_net(X_norm)
+            mask_pred_aug = self.u_net(X_aug)
+            loss_smooth = symmetric_loss(mask_pred_norm, mask_pred_aug, self.loss_fn)
+            loss_all = loss_main + self.smooth_weight * loss_smooth
+
+            self.u_net_optimizer.zero_grad()
+            loss_all.backward()
+            self.u_net_optimizer.step()
+            losses["seg-main"].append(loss_main.item())
+            losses["seg-smooth"].append(loss_smooth.item())
+            losses["seg-all"].append(loss_all.item())
+
+            # update Normalizer
+            self.u_net.eval()
+            self.normalizer.train()
+            mask_pred = self.u_net(X)  # (B, K, H, W)
+            loss_main = self.loss_fn(mask_pred, mask)
+            X_norm = self.normalizer(X)
+            mask_pred_norm = self.u_net(X_norm)
+            mask_pred_aug = self.u_net(X_aug)
+            loss_smooth = symmetric_loss(mask_pred_norm, mask_pred_aug, self.loss_fn)
+            loss_all = loss_main + self.smooth_weight * loss_smooth
+
+            self.norm_optimizer.zero_grad()
+            loss_all.backward()
+            self.norm_optimizer.step()
+            losses["norm"].append(loss_main.item())
+
+            pbar.set_description(f"training batch: {i + 1}/{len(self.train_loader)}: norm: {losses['norm'][-1]:.4f}, "
+                                 f"loss-main: {losses['loss-main'][-1]:.4f}, "
+                                 f"loss-smooth: {losses['loss-smooth'][-1]:.4f}, "
+                                 f"loss-all: {losses['loss-all'][-1]:.4f}")
+
+        return losses
+
+    def eval(self, loader="eval"):
+        """
+        After training for an epoch, alternating optimization should give currently optimal normalizer,
+        so a simple segmentation loss is sufficient.
+        """
+        assert loader in ["eval", "test"]
+        self.normalizer.eval()
+        self.u_net.eval()
+
+        if loader == "eval":
+            data_loader = self.eval_loader
+        else:
+            data_loader = self.test_loader
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(data_loader), desc="training", total=len(data_loader), leave=False)
+        num_samples = 0
+        loss_acc = 0
+
+        for i, (X, mask) in pbar:
+            X_norm = self.normalizer(X)
+            mask_pred = self.u_net(X_norm)
+            loss = self.loss_fn(mask_pred, mask)
+            loss_acc += loss.item() * X.shape[0]
+            num_samples += X.shape[0]
+
+            pbar.set_description(f"{loader} batch {i + 1}/{len(data_loader)}: loss-all: {loss.item():.4f}")
+
+        return loss_acc / num_samples
+
+    def train(self, model_save_dir=None, if_plot=True):
+        time_stamp = self._create_save_folder(model_save_dir)
+        lowest_loss_all = float("inf")
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
+        pbar = trange(self.epochs, desc="epoch")
+        train_losses = {"norm": [], "seg-main": [], "seg-smooth": [], "seg-all": []}
+        eval_losses = {"seg-all": []}
+        for epoch in pbar:
+            train_loss = self._train()
+            eval_loss = self.eval()
+            if self.lr_scheduler is not None:
+                self.lr_scheduler.step()
+
+            for key in train_loss:
+                train_losses[key].append(train_loss[key])
+            eval_losses["seg-all"].append(eval_loss)
+
+            if lowest_loss_all > eval_loss:
+                lowest_loss_all = eval_loss
+                self._save_latest_model(time_stamp, epoch, eval_loss, model_save_dir)
+
+            if if_plot:
+                self._eval_sample_plot()
+
+    def _eval_sample_plot(self, figsize=(9.6, 4.8)):
+        normalizer = Normalizer(self.normalizer.num_layers, self.normalizer.kernel_size, self.normalizer.in_channels,
+                                self.normalizer.intermediate_channels).to(self.device)
+        normalizer.load_state_dict(self.normalizer.state_dict())
+        norm_optimizer = torch.optim.Adam(normalizer.parameters())
+        test_time_adapter = TestTimeAdapter(normalizer, self.u_net, norm_optimizer, self.loss_type)
+        img_ind = np.random.randint(len(self.test_loader.dataset))
+        X = self.test_loader.dataset[img_ind].unsqueeze(0)  # (1, H, W) -> (1, 1, H, W)
+        mask_pred, loss = test_time_adapter.predict(X)  # (1, H, W)
+
+        figsize = plt.rcParams["figure.figsize"] if figsize is None else figsize
+        fig, axes = plt.subplots(1, 2, figsize=figsize)
+        imgs = [X.detach().cpu().numpy()[0, 0], mask_pred[0]]
+        for axis, img in zip(axes, imgs):
+            handle = axis.imshow(img, cmap="gray")
+            plt.colorbar(handle, ax=axis)
+        plt.suptitle(f"loss: {loss}")
+        fig.tight_layout()
+        plt.show()
+
+    def _create_save_folder(self, model_save_dir=None):
+        """
+        This should be called at the root of the project. model_save_dir is the root folder:
+        model_save_dir/
+        -time_stamp_and_additional_info/
+        --model.pt (to save in self._save_latest_model(.))
+        """
+        assert model_save_dir is not None, "please specify a save directory"
+        if not os.path.isdir(model_save_dir):
+            os.mkdir(model_save_dir)
+        original_wd = os.getcwd()
+        os.chdir(model_save_dir)
+        time_stamp = f"{time.time()}".replace(".", "_")
+        os.mkdir(time_stamp)
+        os.chdir(original_wd)
+
+        return time_stamp
+
+    def _save_latest_model(self, time_stamp, epoch, eval_loss, model_save_dir=None):
+        # eval_loss; dict
+        assert model_save_dir is not None, "please specify a save directory"
+        original_wd = os.getcwd()
+        os.chdir(model_save_dir)
+        os.chdir(time_stamp)
+        # remove all old files
+        for filename in os.listdir():
+            if os.path.isfile(filename):
+                os.remove(filename)
+        filename_common = f"{self.loss_type}_epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}"
+        filename_common = filename_common.replace(".", "_")
+        filename_common += ".pt"
+        torch.save(self.normalizer, "norm_" + filename_common)
+        torch.save(self.u_net, "u_net_" + filename_common)
+        os.chdir(original_wd)
+
+
+class TestTimeAdapter(object):
+    def __init__(self, normalizer, u_net, norm_optimizer, loss_type):
+        assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
+        self.normalizer = normalizer
+        self.u_net = u_net
+        self.norm_optimizer = norm_optimizer
+        self.loss_type = loss_type
+        self.loss_fn = cross_entropy_loss if loss_type == "CE" else dice_loss
+
+    def predict(self, X, rel_eps=0.05, max_iters=15):
+        # X: (1, 1, H, W)
+        self.normalizer.train()
+        self.u_net.eval()
+        cur_loss = None
+        next_loss = self._compute_loss(X)
+        num_iters = 1
+
+        while (cur_loss is None) or abs((next_loss.item() - cur_loss.item()) / cur_loss.item()) > rel_eps:
+            if num_iters > max_iters:
+                break
+            self.norm_optimizer.zero_grad()
+            next_loss.backward()
+            self.norm_optimizer.step()
+            cur_loss = next_loss
+            next_loss = self._compute_loss(X)
+            num_iters += 1
+
+        self.normalizer.eval()
+        X_norm = self.normalizer(X)
+        mask_pred = self.u_net(X_norm).argmax(dim=1)
+
+        # mask_pred: (1, K, H, W) -> (1, H, W)
+        return mask_pred.detach().cpu().numpy(), cur_loss
+
+    def _compute_loss(self, X):
+        # X: (1, 1, H, W)
+        X_norm = self.normalizer(X)
+        mask_pred = self.u_net(X)
+        mask_norm_pred = self.u_net(X_norm)
+        loss = symmetric_loss(mask_pred, mask_norm_pred, self.loss_fn)
+
+        return loss
