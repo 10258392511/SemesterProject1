@@ -888,7 +888,8 @@ class Normalizer(nn.Module):
 class AlternatingTrainer(object):
     def __init__(self, normalizer, u_net, train_loader, eval_loader, test_loader,
                  norm_optimizer, u_net_optimizer, lr_scheduler=None,
-                 epochs=20, device=None, notebook=True, loss_type="DSC", num_classes=4, smooth_weight=1):
+                 epochs=20, device=None, notebook=True, loss_type="DSC", num_classes=4, smooth_weight=1,
+                 img_save_dir=None):
         assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
         self.normalizer = normalizer
         self.u_net = u_net
@@ -905,6 +906,9 @@ class AlternatingTrainer(object):
         self.loss_fn = cross_entropy_loss if loss_type == "CE" else dice_loss
         self.num_classes = num_classes
         self.smooth_weight = smooth_weight
+        self.img_save_dir = img_save_dir
+        if not self.notebook:
+            assert self.img_save_dir is not None, "please specify a directory for saving images"
 
     def _train(self):
         if self.notebook:
@@ -1029,9 +1033,9 @@ class AlternatingTrainer(object):
                 self._save_latest_model(time_stamp, epoch, eval_loss, model_save_dir)
 
             if if_plot:
-                self._eval_sample_plot()
+                self._eval_sample_plot(epoch)
 
-    def _eval_sample_plot(self, figsize=(9.6, 4.8)):
+    def _eval_sample_plot(self, epoch, figsize=(9.6, 4.8)):
         normalizer = Normalizer(self.normalizer.num_layers, self.normalizer.kernel_size, self.normalizer.in_channels,
                                 self.normalizer.intermediate_channels).to(self.device)
         normalizer.load_state_dict(self.normalizer.state_dict())
@@ -1054,7 +1058,10 @@ class AlternatingTrainer(object):
             plt.colorbar(handle, ax=axis)
         plt.suptitle(f"loss: {loss:.4f}, loss_gt: {loss_gt.item():.4f}")
         fig.tight_layout()
-        plt.show()
+        if self.notebook:
+            plt.show()
+        else:
+            plt.savefig(os.path.join(self.img_save_dir, f"epoch_{epoch}.png"))
 
     def _create_save_folder(self, model_save_dir=None):
         """
