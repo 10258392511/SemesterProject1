@@ -907,6 +907,7 @@ class AlternatingTrainer(object):
         self.num_classes = num_classes
         self.smooth_weight = smooth_weight
         self.img_save_dir = img_save_dir
+        self.time_stamp = None
         if not self.notebook:
             assert self.img_save_dir is not None, "please specify a directory for saving images"
 
@@ -1061,7 +1062,7 @@ class AlternatingTrainer(object):
         if self.notebook:
             plt.show()
         else:
-            plt.savefig(os.path.join(self.img_save_dir, f"epoch_{epoch}.png"))
+            plt.savefig(os.path.join(self.img_save_dir, self.time_stamp, f"epoch_{epoch + 1}.png"))
 
     def _create_save_folder(self, model_save_dir=None):
         """
@@ -1076,8 +1077,17 @@ class AlternatingTrainer(object):
         original_wd = os.getcwd()
         os.chdir(model_save_dir)
         time_stamp = f"{time.time()}".replace(".", "_")
+        self.time_stamp = time_stamp
         os.mkdir(time_stamp)
         os.chdir(original_wd)
+
+        if not self.notebook:
+            if not os.path.isdir(self.img_save_dir):
+                os.mkdir(self.img_save_dir)
+            original_wd = os.getcwd()
+            os.chdir(self.img_save_dir)
+            os.mkdir(time_stamp)
+            os.chdir(original_wd)
 
         return time_stamp
 

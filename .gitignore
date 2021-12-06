@@ -8,3 +8,4 @@ out_images/
 data/FashionMNIST
 data/MnMs
 logging/
+*.pkl
