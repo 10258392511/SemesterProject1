@@ -23,6 +23,7 @@ if __name__ == '__main__':
     parser.add_argument("--eval_plot_save_dir", required=True)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--loss_type", default="CE", choices=["DSC", "CE"])
+    parser.add_argument("--smooth_weight", type=float, default=1.)
 
     args = parser.parse_args()
 
@@ -49,7 +50,8 @@ if __name__ == '__main__':
     # Training
     alt_trainer = AlternatingTrainer(normalizer, u_net, train_loader, eval_loader, test_loader, norm_opt, u_net_opt,
                                      epochs=args.epochs, loss_type=args.loss_type, device=args.device,
-                                     img_save_dir=args.eval_plot_save_dir, notebook=False)
+                                     img_save_dir=args.eval_plot_save_dir, notebook=False,
+                                     smooth_weight=args.smooth_weight)
     train_losses, eval_losses = alt_trainer.train(args.model_save_dir)
 
     with open("./loss_curve.pkl", "wb") as wf:

@@ -949,9 +949,10 @@ class AlternatingTrainer(object):
             self.u_net.eval()
             self.normalizer.train()
             mask_pred = self.u_net(X)  # (B, K, H, W)
-            loss_main = self.loss_fn(mask_pred, mask)
+            # loss_main = self.loss_fn(mask_pred, mask)
             X_norm = self.normalizer(X)
             mask_pred_norm = self.u_net(X_norm)
+            loss_main = self.loss_fn(mask_pred_norm, mask)
             mask_pred_aug = self.u_net(X_aug)
             loss_smooth = symmetric_loss(mask_pred_norm, mask_pred_aug, self.loss_fn)
             loss_all = loss_main + self.smooth_weight * loss_smooth
@@ -1121,6 +1122,7 @@ class TestTimeAdapter(object):
 
     def predict(self, X, rel_eps=0.05, max_iters=15):
         # X: (1, 1, H, W)
+        X = (2 * X - 1).to(self.device)
         self.normalizer.train()
         self.u_net.eval()
         cur_loss = None
