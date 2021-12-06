@@ -14,7 +14,7 @@ def mask_to_one_hot(mask, num_classes):
 
 def cross_entropy_loss(X, mask):
     # X: (B, K, H, W), mask: (B, 1, H, W) -> (B, H, W)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=torch.FloatTensor([0.1, 0.3, 0.3, 0.3]).to(X.device))
     loss = criterion(X, mask.squeeze(1))
 
     return loss

@@ -762,9 +762,9 @@ class MNISTVAETrainer(object):
             filename_common += f"_{key}_{eval_loss[key]:.4f}"
         filename_common = filename_common.replace(".", "_")
         filename_common += ".pt"
-        torch.save(self.vae, "vae_" + filename_common)
-        torch.save(self.int_warper, "int_warper_" + filename_common)
-        torch.save(self.shape_warper, "shape_warper_" + filename_common)
+        torch.save(self.vae.state_dict(), "vae_" + filename_common)
+        torch.save(self.int_warper.state_dict(), "int_warper_" + filename_common)
+        torch.save(self.shape_warper.state_dict(), "shape_warper_" + filename_common)
         os.chdir(original_wd)
 
     @torch.no_grad()
@@ -1105,8 +1105,8 @@ class AlternatingTrainer(object):
         filename_common = f"{self.loss_type}_epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}"
         filename_common = filename_common.replace(".", "_")
         filename_common += ".pt"
-        torch.save(self.normalizer, "norm_" + filename_common)
-        torch.save(self.u_net, "u_net_" + filename_common)
+        torch.save(self.normalizer.state_dict(), "norm_" + filename_common)
+        torch.save(self.u_net.state_dict(), "u_net_" + filename_common)
         os.chdir(original_wd)
 
 
