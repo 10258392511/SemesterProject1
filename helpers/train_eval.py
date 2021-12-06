@@ -948,7 +948,7 @@ class AlternatingTrainer(object):
             # update Normalizer
             self.u_net.eval()
             self.normalizer.train()
-            mask_pred = self.u_net(X)  # (B, K, H, W)
+            # mask_pred = self.u_net(X)  # (B, K, H, W)
             # loss_main = self.loss_fn(mask_pred, mask)
             X_norm = self.normalizer(X)
             mask_pred_norm = self.u_net(X_norm)
