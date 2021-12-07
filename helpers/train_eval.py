@@ -1037,6 +1037,8 @@ class AlternatingTrainer(object):
             if if_plot:
                 self._eval_sample_plot(epoch)
 
+        return train_losses, eval_losses
+
     def _eval_sample_plot(self, epoch, figsize=(9.6, 4.8)):
         normalizer = Normalizer(self.normalizer.num_layers, self.normalizer.kernel_size, self.normalizer.in_channels,
                                 self.normalizer.intermediate_channels).to(self.device)
