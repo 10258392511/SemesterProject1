@@ -226,3 +226,36 @@ def get_transforms():
     options = [A.Flip(), A.ElasticTransform(alpha=50, alpha_affine=10)]
 
     return options
+
+
+@torch.no_grad()
+def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, suptitle="", **kwargs):
+    assert image_save_path is not None, "please specify a saving path"
+    u_net.eval()
+    normalizer.eval()
+    figsize = kwargs.get("figsize", plt.rcParams["figure.figsize"])
+    fraction = kwargs.get("fraction", 1)
+    device = kwargs.get("device", "cuda")
+    device = torch.device(device)
+
+    fig, axes = plt.subplots(2, 3, figsize=figsize)
+    ind = np.random.randint(len(test_loader.dataset))
+    X, mask = test_loader.dataset[ind]  # (1, 256, 256), (1, 256, 256)
+    X = X.to(device)
+    mask = mask.to(device)
+    mask_direct_pred = u_net(2 * X.unsqueeze(0) - 1).argmax(dim=1)  # (1, 256, 256)
+    X_norm = normalizer(2 * X.unsqueeze(0) - 1)  # (1, 1, 256, 256)
+    mask_norm_pred = u_net(X_norm).argmax(dim=1)  # (1, 256, 256)
+    img_grid = [[X.cpu().numpy()[0], mask.cpu().numpy()[0], mask_direct_pred.cpu().numpy()[0]],
+                [(X_norm.cpu().numpy()[0, 0] + 1) / 2, ((X_norm[0, 0] + 1) / 2 - X[0]).cpu().numpy(),
+                mask_norm_pred.cpu().numpy()[0]]]
+    title_grid = [["original", "gt", "direct seg"],
+                  ["normed", "normed diff", "normed seg"]]
+    for i in range(2):
+        for j in range(3):
+            handle = axes[i, j].imshow(img_grid[i][j], cmap="gray")
+            plt.colorbar(handle, ax=axes[i, j], fraction=fraction)
+            axes[i, j].set_title(title_grid[i][j])
+    fig.suptitle(suptitle)
+    fig.tight_layout()
+    plt.savefig(image_save_path)
