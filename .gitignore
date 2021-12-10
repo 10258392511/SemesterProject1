@@ -6,6 +6,6 @@ __pycache__
 params/
 out_images/
 data/FashionMNIST
-data/MnMs
+data/MnMs*
 logging/
 *.pkl

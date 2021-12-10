@@ -29,6 +29,7 @@ if __name__ == '__main__':
                 patient_info[row[0]] = {"ED": row[1], "ES": row[2]}
     # print(len(patient_info))
 
+    counter = 0
     for root, dirs, files in os.walk(args.input_dir):
         for file in files:
             if ".nii.gz" in file:
@@ -39,15 +40,30 @@ if __name__ == '__main__':
                 patient_num = file[:ind]
                 ed = patient_info[patient_num]["ED"]
                 es = patient_info[patient_num]["ES"]
-                img_ed_and_es = img_data[..., [ed, es]]  # (H, W, Z, 2)
-                img_ed_and_es = nib.Nifti1Image(img_ed_and_es, affine=np.eye(4))
-                img_ed_and_es_path = os.path.join(args.output_dir, "images", file)
+                # img_ed_and_es = img_data[..., [ed, es]]  # (H, W, Z, 2)
+                # img_ed_and_es = nib.Nifti1Image(img_ed_and_es, affine=np.eye(4))
+                # img_ed_and_es_path = os.path.join(args.output_dir, "images", file)
+                img_ed = nib.Nifti1Image(img_data[..., ed], affine=np.eye(4))
+                img_es = nib.Nifti1Image(img_data[..., es], affine=np.eye(4))
+                img_ed_path = os.path.join(args.output_dir, "images", f"_ed_{file}")
+                img_es_path = os.path.join(args.output_dir, "images", f"_es_{file}")
+
                 # print(f"current: {img_ed_and_es_path}")
                 # print("-" * 40)
-                nib.save(img_ed_and_es, img_ed_and_es_path)
-                img_ed_and_es_corrected_path = os.path.join(args.output_dir, "images_corrected", file)
-                print(f"current: {img_ed_and_es_path}, {img_ed_and_es_corrected_path}")
-                subprocess.run(["/usr/bmicnas01/data-biwi-01/bmicdatasets/Sharing/N4_th", img_ed_and_es_path,
-                                img_ed_and_es_corrected_path], capture_output=True)
+                nib.save(img_ed, img_ed_path)
+                nib.save(img_es, img_es_path)
+                img_ed_corrected_path = os.path.join(args.output_dir, "images_corrected", f"_ed_{file}")
+                img_es_corrected_path = os.path.join(args.output_dir, "images_corrected", f"_es_{file}")
+                if "_gt" in file:
+                    nib.save(img_ed, img_ed_corrected_path)
+                    nib.save(img_es, img_es_corrected_path)
+                else:
+                    counter += 1
+                    print(f"current counter; {counter}: {img_ed_path}, {img_es_path}, "
+                          f"{img_ed_corrected_path}, {img_es_corrected_path}")
+                    subprocess.run(["/usr/bmicnas01/data-biwi-01/bmicdatasets/Sharing/N4_th", img_ed_path,
+                                    img_ed_corrected_path], capture_output=True)
+                    subprocess.run(["/usr/bmicnas01/data-biwi-01/bmicdatasets/Sharing/N4_th", img_es_path,
+                                    img_es_corrected_path], capture_output=True)
 
     print("Done!")

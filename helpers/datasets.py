@@ -126,7 +126,8 @@ class MnMsDataset(Dataset):
         self.gamma_limit = gamma_limit
         self.target_size = target_size
         self._read_patient_info()
-        self.num_samples = []
+        # self.num_samples = []
+        self.num_samples = -1
         self._compute_num_samples()
 
     def _read_patient_info(self):
@@ -152,48 +153,62 @@ class MnMsDataset(Dataset):
                 self.patient_id = list(self.patient_info.keys())
 
     def _compute_num_samples(self):
-        # read in all data and document filename
-        for patient_id in self.patient_info:
-            directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
-            img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
-            # mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
-            img_data = nib.load(img_path)
-            # mask_data = nib.load(mask_path)
-            img_data_array = img_data.get_fdata()
-            # mask_data_array = mask_data.get_fdata()
-            H, W, D, T = img_data.shape
-            self.num_samples.append(2 * D)
+        # # read in all data and document filename
+        # for patient_id in self.patient_info:
+        #     directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
+        #     img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
+        #     # mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
+        #     img_data = nib.load(img_path)
+        #     # mask_data = nib.load(mask_path)
+        #     img_data_array = img_data.get_fdata()
+        #     # mask_data_array = mask_data.get_fdata()
+        #     H, W, D, T = img_data.shape
+        #     self.num_samples.append(2 * D)
+
+        # directly read from corrected dataset
+        counter = 0
+        img_dir = os.path.join(self.data_path_root, "images")
+        for root, dirs, files in os.walk(img_dir):
+            for file in files:
+                if "_sa.nii.gz" in file:
+                    counter += 1
+
+        self.num_samples = counter * 2
 
     def __len__(self):
-        return sum(self.num_samples)
+        # return sum(self.num_samples)
+        return self.num_samples
 
     def __getitem__(self, index):
         assert 0 <= index < self.__len__(), "invalid index"
         # img, mask = self.eval_test_array["image"][index, ...], self.eval_test_array["mask"][index, ...]
-        counter = index
-        img, mask, t, img_data_array, mask_data_array = None, None, None, None, None
-        for i, patient_id in enumerate(self.patient_id):
-            num_samples = self.num_samples[i]
-            if counter < num_samples:
-                directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
-                img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
-                mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
-                img_data = nib.load(img_path)
-                mask_data = nib.load(mask_path)
-                img_data_array = img_data.get_fdata()
-                mask_data_array = mask_data.get_fdata()
-                H, W, D, T = img_data_array.shape
-                img_data_array = (img_data_array / 255.).astype(np.float32)
-                ed, es = self.patient_info[patient_id]["ED"], self.patient_info[patient_id]["ES"]
-                if counter < D:
-                    img, mask = img_data_array[..., counter, ed], mask_data_array[..., counter, ed]
-                    t = ed
-                else:
-                    counter -= D
-                    img, mask = img_data_array[..., counter - D, es], mask_data_array[..., counter, es]
-                    t = es
-                break
-            counter -= num_samples
+        # counter = index
+        # img, mask, t, img_data_array, mask_data_array = None, None, None, None, None
+        # for i, patient_id in enumerate(self.patient_id):
+        #     num_samples = self.num_samples[i]
+        #     if counter < num_samples:
+        #         directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
+        #         img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
+        #         mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
+        #         img_data = nib.load(img_path)
+        #         mask_data = nib.load(mask_path)
+        #         img_data_array = img_data.get_fdata()
+        #         mask_data_array = mask_data.get_fdata()
+        #         H, W, D, T = img_data_array.shape
+        #         img_data_array = (img_data_array / 255.).astype(np.float32)
+        #         ed, es = self.patient_info[patient_id]["ED"], self.patient_info[patient_id]["ES"]
+        #         if counter < D:
+        #             img, mask = img_data_array[..., counter, ed], mask_data_array[..., counter, ed]
+        #             t = ed
+        #         else:
+        #             counter -= D
+        #             img, mask = img_data_array[..., counter - D, es], mask_data_array[..., counter, es]
+        #             t = es
+        #         break
+        #     counter -= num_samples
+        patient_num = self.patient_id[index // 2]  # (0, 1) -> 0, (2, 3) -> 1, ...
+
+
 
         if self.mode == "train":
             H, W, D, T = img_data_array.shape
