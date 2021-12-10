@@ -12,11 +12,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     new_dirs = ["images", "images_corrected"]
-    for new_dir in new_dirs:
-        new_dir_path = os.path.join(args.output_dir, new_dir)
-        if not os.path.isdir(new_dir_path):
-            os.mkdir(new_dir_path)
-
+#    for new_dir in new_dirs:
+#        new_dir_path = os.path.join(args.output_dir, new_dir)
+#        print(f"{new_dir_path}")
+#        if not os.path.isdir(new_dir_path):
+#            os.makedirs(new_dir_path)
+#
     csv_files = ["mnms_csf.csv", "mnms_hvhd.csv", "mnms_uhe.csv"]
     patient_info = {}
     for csv_file in csv_files:
@@ -41,9 +42,11 @@ if __name__ == '__main__':
                 img_ed_and_es = img_data[..., [ed, es]]  # (H, W, Z, 2)
                 img_ed_and_es = nib.Nifti1Image(img_ed_and_es, affine=np.eye(4))
                 img_ed_and_es_path = os.path.join(args.output_dir, "images", file)
+                # print(f"current: {img_ed_and_es_path}")
+                # print("-" * 40)
                 nib.save(img_ed_and_es, img_ed_and_es_path)
                 img_ed_and_es_corrected_path = os.path.join(args.output_dir, "images_corrected", file)
-                print(f"current: {img_ed_and_es}, {img_ed_and_es_corrected_path}")
+                print(f"current: {img_ed_and_es_path}, {img_ed_and_es_corrected_path}")
                 subprocess.run(["/usr/bmicnas01/data-biwi-01/bmicdatasets/Sharing/N4_th", img_ed_and_es_path,
                                 img_ed_and_es_corrected_path], capture_output=True)
 
