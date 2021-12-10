@@ -1,5 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-eval "$(conda shell.bash hook)"
-conda activate deep_learning
-python bias_correction.py --input_dir /itet-stor/zhexwu/net_scratch/data/MnMs/Labeled --output_dir /itet-stor/zhexwu/net_scratch/data/MnMs_extracted
+python ./run_alternating_opt.py --dataset_name "csf" --dataset_root "./data/MnMs" --device "cpu" --batch_size 4 --model_save_dir "./params/norm_u_net" --eval_plot_save_dir "./images/norm_u_net"
+
