@@ -30,7 +30,7 @@ if __name__ == '__main__':
     # print(len(patient_info))
 
     counter = 0
-    for root, dirs, files in os.walk(args.input_dir):
+    for root, dirs, files in os.walk(os.path.join(args.input_dir, "Labeled")):
         for file in files:
             if ".nii.gz" in file:
                 file_path = os.path.join(root, file)
@@ -45,15 +45,15 @@ if __name__ == '__main__':
                 # img_ed_and_es_path = os.path.join(args.output_dir, "images", file)
                 img_ed = nib.Nifti1Image(img_data[..., ed], affine=np.eye(4))
                 img_es = nib.Nifti1Image(img_data[..., es], affine=np.eye(4))
-                img_ed_path = os.path.join(args.output_dir, "images", f"_ed_{file}")
-                img_es_path = os.path.join(args.output_dir, "images", f"_es_{file}")
+                img_ed_path = os.path.join(args.output_dir, "images", f"ed_{file}")
+                img_es_path = os.path.join(args.output_dir, "images", f"es_{file}")
 
                 # print(f"current: {img_ed_and_es_path}")
                 # print("-" * 40)
                 nib.save(img_ed, img_ed_path)
                 nib.save(img_es, img_es_path)
-                img_ed_corrected_path = os.path.join(args.output_dir, "images_corrected", f"_ed_{file}")
-                img_es_corrected_path = os.path.join(args.output_dir, "images_corrected", f"_es_{file}")
+                img_ed_corrected_path = os.path.join(args.output_dir, "images_corrected", f"ed_{file}")
+                img_es_corrected_path = os.path.join(args.output_dir, "images_corrected", f"es_{file}")
                 if "_gt" in file:
                     nib.save(img_ed, img_ed_corrected_path)
                     nib.save(img_es, img_es_corrected_path)

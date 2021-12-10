@@ -9,3 +9,4 @@ data/FashionMNIST
 data/MnMs*
 logging/
 *.pkl
+*.gz
