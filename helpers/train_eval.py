@@ -919,11 +919,11 @@ class AlternatingTrainer(object):
         pbar = tqdm(enumerate(self.train_loader), desc="training", total=len(self.train_loader), leave=False)
         losses = {"norm": [], "seg-main": [], "seg-smooth": [], "seg-all": []}
         for i, (X, X_aug, mask) in pbar:
-            # ###########
-            # # TODO: Comment out
-            # if i >= 2:
-            #     break
-            # ##########
+            ###########
+            # TODO: Comment out
+            if i >= 2:
+                break
+            ##########
             X = (2 * X - 1).float().to(self.device)
             X_aug = (2 * X_aug).float().to(self.device)
             mask = mask.to(self.device)
@@ -991,11 +991,11 @@ class AlternatingTrainer(object):
         loss_acc = 0
 
         for i, (X, mask) in pbar:
-            # ###########
-            # # TODO: Comment out
-            # if i >= 2:
-            #     break
-            # ##########
+            ###########
+            # TODO: Comment out
+            if i >= 2:
+                break
+            ##########
             X = (2 * X - 1).float().to(self.device)
             mask = mask.to(self.device)
 

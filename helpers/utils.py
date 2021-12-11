@@ -259,3 +259,17 @@ def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, supt
     fig.suptitle(suptitle)
     fig.tight_layout()
     plt.savefig(image_save_path)
+
+
+def normalize(img, norm_type="div_by_max", eps=1e-8):
+    # img: (H, W)
+    assert norm_type in ["zero_mean", "div_by_max"], "invalid mode"
+    if norm_type == "zero_mean":
+        img = (img - np.mean(img)) / (np.std(img) + eps)
+    else:
+        perc1 = np.percentile(img, 1)
+        perc99 = np.percentile(img, 99)
+        img = (img - perc1) / (perc99 - perc1 + eps)
+        img = np.clip(img, 0, 1)
+
+    return img

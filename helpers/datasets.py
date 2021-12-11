@@ -11,7 +11,7 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor, Resize
 from albumentations import BasicTransform, Compose
-from .utils import convert_mask
+from .utils import convert_mask, normalize
 
 
 class CarDataset(Dataset):
@@ -126,9 +126,12 @@ class MnMsDataset(Dataset):
         self.gamma_limit = gamma_limit
         self.target_size = target_size
         self._read_patient_info()
-        # self.num_samples = []
-        self.num_samples = -1
+        self.num_samples = []
+        # self.num_samples = -1
+        # self.img_paths = []
+        # self.mask_paths = []
         self._compute_num_samples()
+        # self._get_img_mask_paths()
 
     def _read_patient_info(self):
         with open(self.csv_path, "r", newline="") as rf:
@@ -153,77 +156,100 @@ class MnMsDataset(Dataset):
                 self.patient_id = list(self.patient_info.keys())
 
     def _compute_num_samples(self):
-        # # read in all data and document filename
-        # for patient_id in self.patient_info:
-        #     directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
-        #     img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
-        #     # mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
-        #     img_data = nib.load(img_path)
-        #     # mask_data = nib.load(mask_path)
-        #     img_data_array = img_data.get_fdata()
-        #     # mask_data_array = mask_data.get_fdata()
-        #     H, W, D, T = img_data.shape
-        #     self.num_samples.append(2 * D)
+        # read in all data and document filename
+        for patient_id in self.patient_info:
+            # directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
+            # img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
+            directory = os.path.join(self.data_path_root, f"images_corrected")
+            img_path = os.path.join(directory, f"ed_{patient_id}_sa.nii.gz")
+            # mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
+            img_data = nib.load(img_path)
+            # mask_data = nib.load(mask_path)
+            img_data_array = img_data.get_fdata()
+            # mask_data_array = mask_data.get_fdata()
+            # H, W, D, T = img_data.shape
+            H, W, D = img_data.shape
+            self.num_samples.append(2 * D)
 
-        # directly read from corrected dataset
-        counter = 0
-        img_dir = os.path.join(self.data_path_root, "images")
-        for root, dirs, files in os.walk(img_dir):
-            for file in files:
-                if "_sa.nii.gz" in file:
-                    counter += 1
-
-        self.num_samples = counter * 2
+    # def _get_img_mask_paths(self):
+    #     base_dir = os.path.join(self.data_path_root, "images_corrected")
+    #     for patient_id in self.patient_id:
+    #         self.img_paths += [os.path.join(base_dir, f"es_{patient_id}_sa.nii.gz"),
+    #                            os.path.join(base_dir, f"ed_{patient_id}_sa.nii.gz")]
+    #         self.mask_paths += [os.path.join(base_dir, f"es_{patient_id}_sa_gt.nii.gz"),
+    #                            os.path.join(base_dir, f"ed_{patient_id}_sa_gt.nii.gz")]
 
     def __len__(self):
-        # return sum(self.num_samples)
-        return self.num_samples
+        return sum(self.num_samples)
+        # return self.num_samples
+        # return len(self.patient_id) * 2
 
     def __getitem__(self, index):
         assert 0 <= index < self.__len__(), "invalid index"
         # img, mask = self.eval_test_array["image"][index, ...], self.eval_test_array["mask"][index, ...]
-        # counter = index
-        # img, mask, t, img_data_array, mask_data_array = None, None, None, None, None
-        # for i, patient_id in enumerate(self.patient_id):
-        #     num_samples = self.num_samples[i]
-        #     if counter < num_samples:
-        #         directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
-        #         img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
-        #         mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
-        #         img_data = nib.load(img_path)
-        #         mask_data = nib.load(mask_path)
-        #         img_data_array = img_data.get_fdata()
-        #         mask_data_array = mask_data.get_fdata()
-        #         H, W, D, T = img_data_array.shape
-        #         img_data_array = (img_data_array / 255.).astype(np.float32)
-        #         ed, es = self.patient_info[patient_id]["ED"], self.patient_info[patient_id]["ES"]
-        #         if counter < D:
-        #             img, mask = img_data_array[..., counter, ed], mask_data_array[..., counter, ed]
-        #             t = ed
-        #         else:
-        #             counter -= D
-        #             img, mask = img_data_array[..., counter - D, es], mask_data_array[..., counter, es]
-        #             t = es
-        #         break
-        #     counter -= num_samples
-        patient_num = self.patient_id[index // 2]  # (0, 1) -> 0, (2, 3) -> 1, ...
+        counter = index
+        img, mask, t, img_data_array, mask_data_array = None, None, None, None, None
+        for i, patient_id in enumerate(self.patient_id):
+            num_samples = self.num_samples[i]
+            # if counter < num_samples:
+            #     directory = os.path.join(self.data_path_root, f"Labeled/{patient_id}")
+            #     img_path = os.path.join(directory, f"{patient_id}_sa.nii.gz")
+            #     mask_path = os.path.join(directory, f"{patient_id}_sa_gt.nii.gz")
+            #     img_data = nib.load(img_path)
+            #     mask_data = nib.load(mask_path)
+            #     img_data_array = img_data.get_fdata()
+            #     mask_data_array = mask_data.get_fdata()
+            #     H, W, D, T = img_data_array.shape
+            #     img_data_array = (img_data_array / 255.).astype(np.float32)
+            #     ed, es = self.patient_info[patient_id]["ED"], self.patient_info[patient_id]["ES"]
+            #     if counter < D:
+            #         img, mask = img_data_array[..., counter, ed], mask_data_array[..., counter, ed]
+            #         t = ed
+            #     else:
+            #         counter -= D
+            #         img, mask = img_data_array[..., counter - D, es], mask_data_array[..., counter, es]
+            #         t = es
+            #     break
 
+            if counter < num_samples:
+                if counter < num_samples // 2:
+                    img_path = os.path.join(self.data_path_root, "images_corrected", f"ed_{patient_id}_sa.nii.gz")
+                    mask_path = os.path.join(self.data_path_root, "images_corrected", f"ed_{patient_id}_sa_gt.nii.gz")
+                else:
+                    img_path = os.path.join(self.data_path_root, "images_corrected", f"es_{patient_id}_sa.nii.gz")
+                    mask_path = os.path.join(self.data_path_root, "images_corrected", f"es_{patient_id}_sa_gt.nii.gz")
+                    counter -= num_samples // 2
+                break
+            counter -= num_samples
 
+        # print(f"img_paths: {len(self.img_paths)}, mask_paths: {len(self.mask_paths)}")
+        # img_path, mask_path = self.img_paths[index], self.mask_paths[index]
+        img_data = nib.load(img_path)
+        img = img_data.get_fdata()[..., counter]
+        mask_data = nib.load(mask_path)
+        mask = mask_data.get_fdata()[..., counter]
+
+        # Normalize img
+        img = normalize(img, norm_type="div_by_max")
 
         if self.mode == "train":
-            H, W, D, T = img_data_array.shape
-            another_t = np.random.randint(T)
-            while another_t == t:
-                another_t = np.random.randint(T)
-            img1 = img_data_array[..., counter, another_t]
+            # H, W, D, T = img_data_array.shape
+            # another_t = np.random.randint(T)
+            # while another_t == t:
+            #     another_t = np.random.randint(T)
+            # img1 = img_data_array[..., counter, another_t]
+            # # self.plot_triple(img, img1, mask)
+            # transform = A.Compose(self.transforms, additional_targets={"image1": "image"})
+            # transformed = transform(image=img, mask=mask, image1=img1)
+            # img, mask, img1 = transformed["image"], transformed["mask"], transformed["image1"]
             # self.plot_triple(img, img1, mask)
-            transform = A.Compose(self.transforms, additional_targets={"image1": "image"})
-            transformed = transform(image=img, mask=mask, image1=img1)
-            img, mask, img1 = transformed["image"], transformed["mask"], transformed["image1"]
-            # self.plot_triple(img, img1, mask)
+            transform = A.Compose(self.transforms)
+            transformed = transform(image=img, mask=mask)
+            img, mask = transformed["image"], transformed["mask"]
 
             gamma_transform = A.RandomGamma(gamma_limit=self.gamma_limit, always_apply=True)
-            img1 = gamma_transform(image=img1)["image"]
+            # img1 = gamma_transform(image=img1)["image"]
+            img1 = gamma_transform(image=img)["image"]
 
             cropper = A.Compose([A.RandomResizedCrop(height=self.target_size[0],
                                                      width=self.target_size[1], always_apply=True)],
