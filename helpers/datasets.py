@@ -6,6 +6,7 @@ import csv
 import nibabel as nib
 import albumentations as A
 import os
+import h5py
 
 from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import MNIST
@@ -260,6 +261,75 @@ class MnMsDataset(Dataset):
             # (1, H, W), (1, H, W), (1, H, W)
             return torch.FloatTensor(img).unsqueeze(0), torch.FloatTensor(img1).unsqueeze(0), \
                            torch.LongTensor(mask).unsqueeze(0)
+
+        else:
+            resizer = A.Resize(*self.target_size, always_apply=True)
+            transformed = resizer(image=img, mask=mask)
+            img, mask = transformed["image"], transformed["mask"]
+
+            return torch.FloatTensor(img).unsqueeze(0), torch.LongTensor(mask).unsqueeze(0)
+
+    def plot_triple(self, img, img1, mask, figsize=None):
+        figsize = plt.rcParams["figure.figsize"] if figsize is None else figsize
+        fig, axes = plt.subplots(1, 3, figsize=figsize)
+        imgs = [img, img1, mask]
+        for i, img_iter in enumerate(imgs):
+            handle = axes[i].imshow(img_iter, cmap="gray")
+            plt.colorbar(handle, ax=axes[i], fraction=0.1)
+        fig.tight_layout()
+        plt.show()
+
+
+class MnMsHDF5Dataset(Dataset):
+    def __init__(self, data_path, source_name, mode, transforms: list,
+                 gamma_limit=(50, 150), target_size=(256, 256)):
+        super(MnMsHDF5Dataset, self).__init__()
+        assert ".h5" in data_path, "data_path must be a hdf5 file"
+        assert source_name in ["csf", "hvhd", "uhe"], "invalid source name"
+        assert mode in ["train", "eval", "test"], "invalid mode"
+
+        self.data_path = data_path
+        self.source_name = source_name
+        self.mode = mode
+        self.transforms = transforms
+        self.gamma_limit = gamma_limit
+        self.target_size = target_size
+
+    def __len__(self):
+        with h5py.File(self.data_path, "r") as hdf:
+            group_source = hdf.get(self.source_name)
+            group_data_mode = group_source.get(self.mode)
+
+            return group_data_mode.attrs["SIZE"]
+
+    def __getitem__(self, index):
+        assert 0 <= index < self.__len__()
+        with h5py.File(self.data_path, "r") as hdf:
+            group_source = hdf.get(self.source_name)
+            group_data_mode = group_source.get(self.mode)
+
+            img, mask = np.array(group_data_mode.get(f"img{index}")), np.array(group_data_mode.get(f"mask{index}"))
+
+        # Normalize img
+        img = normalize(img, norm_type="div_by_max")
+
+        if self.mode == "train":
+            transform = A.Compose(self.transforms)
+            transformed = transform(image=img, mask=mask)
+            img, mask = transformed["image"], transformed["mask"]
+
+            gamma_transform = A.RandomGamma(gamma_limit=self.gamma_limit, always_apply=True)
+            img1 = gamma_transform(image=img)["image"]
+
+            cropper = A.Compose([A.RandomResizedCrop(height=self.target_size[0],
+                                                     width=self.target_size[1], always_apply=True)],
+                                additional_targets={"image1": "image"})
+            transformed = cropper(image=img, mask=mask, image1=img1)
+            img, mask, img1 = transformed["image"], transformed["mask"], transformed["image1"]
+
+            # (1, H, W), (1, H, W), (1, H, W)
+            return torch.FloatTensor(img).unsqueeze(0), torch.FloatTensor(img1).unsqueeze(0), \
+                   torch.LongTensor(mask).unsqueeze(0)
 
         else:
             resizer = A.Resize(*self.target_size, always_apply=True)
