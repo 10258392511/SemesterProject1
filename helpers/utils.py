@@ -229,8 +229,8 @@ def get_transforms():
 
 
 @torch.no_grad()
-def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, suptitle="", **kwargs):
-    assert image_save_path is not None, "please specify a saving path"
+def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, suptitle="",
+                      if_save=True, X_in=None, mask_in=None, **kwargs):
     u_net.eval()
     normalizer.eval()
     figsize = kwargs.get("figsize", plt.rcParams["figure.figsize"])
@@ -239,8 +239,11 @@ def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, supt
     device = torch.device(device)
 
     fig, axes = plt.subplots(2, 3, figsize=figsize)
-    ind = np.random.randint(len(test_loader.dataset))
-    X, mask = test_loader.dataset[ind]  # (1, 256, 256), (1, 256, 256)
+    if (X_in is None or mask_in is None) and test_loader is not None:
+        ind = np.random.randint(len(test_loader.dataset))
+        X, mask = test_loader.dataset[ind]  # (1, 256, 256), (1, 256, 256)
+    else:
+        X, mask = X_in, mask_in
     X = X.to(device)
     mask = mask.to(device)
     mask_direct_pred = u_net(2 * X.unsqueeze(0) - 1).argmax(dim=1)  # (1, 256, 256)
@@ -258,7 +261,12 @@ def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, supt
             axes[i, j].set_title(title_grid[i][j])
     fig.suptitle(suptitle)
     fig.tight_layout()
-    plt.savefig(image_save_path)
+
+    if if_save:
+        assert image_save_path is not None, "please specify a saving path"
+        plt.savefig(image_save_path)
+
+    return fig
 
 
 def normalize(img, norm_type="div_by_max", eps=1e-8):

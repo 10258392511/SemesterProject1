@@ -281,6 +281,18 @@ class MnMsDataset(Dataset):
 
 
 class MnMsHDF5Dataset(Dataset):
+    """
+    File hierarchy:
+
+    root
+    -csf
+    --train
+    ---img0
+    ---mask0
+    --eval
+    --test
+    ...
+    """
     def __init__(self, data_path, source_name, mode, transforms: list,
                  gamma_limit=(50, 150), target_size=(256, 256)):
         super(MnMsHDF5Dataset, self).__init__()

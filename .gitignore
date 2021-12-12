@@ -10,3 +10,4 @@ data/MnMs*
 logging/
 *.pkl
 *.gz
+run/

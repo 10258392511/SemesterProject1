@@ -8,8 +8,9 @@ import time
 
 from torchvision.utils import make_grid
 from torch_lr_finder import LRFinder
-from .utils import real_nvp_preprocess, compute_derivatives, warp_optical_flow
+from .utils import real_nvp_preprocess, compute_derivatives, warp_optical_flow, make_summary_plot
 from .losses import mask_to_one_hot, cross_entropy_loss, dice_loss, symmetric_loss
+from torch.utils.tensorboard import SummaryWriter
 
 
 def lr_search(model, criterion, optimizer, train_loader, end_lr=1, device=None):
@@ -877,6 +878,7 @@ class Normalizer(nn.Module):
                        nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size, padding=padding)]
         layers += [nn.ReLU(), nn.Conv2d(intermediate_channels, 1, kernel_size, padding=padding)]
         self.layers = nn.Sequential(*layers)
+        self.conv_layers = [layer for layer in layers if isinstance(layer, nn.Conv2d)]
 
     def forward(self, x):
         # x: (B, C, H, W)
@@ -888,9 +890,9 @@ class Normalizer(nn.Module):
 class AlternatingTrainer(object):
     def __init__(self, normalizer, u_net, train_loader, eval_loader, test_loader,
                  norm_optimizer, u_net_optimizer, lr_scheduler=None,
-                 epochs=20, device=None, notebook=True, loss_type="DSC", num_classes=4, smooth_weight=1,
-                 img_save_dir=None):
-        assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
+                 epochs=20, device=None, notebook=True, num_classes=4, smooth_weight=1,
+                 img_save_dir=None, writer: SummaryWriter = None, ce_weight=1, dsc_weight=0, time_stamp=None):
+        # assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
         self.normalizer = normalizer
         self.u_net = u_net
         self.train_loader = train_loader
@@ -902,12 +904,15 @@ class AlternatingTrainer(object):
         self.epochs = epochs
         self.device = torch.device("cuda") if device is None else device
         self.notebook = notebook
-        self.loss_type = loss_type
-        self.loss_fn = cross_entropy_loss if loss_type == "CE" else dice_loss
+        self.ce_weight = ce_weight
+        self.dsc_weight = dsc_weight
+        self.loss_fn = lambda X, mask: ce_weight * cross_entropy_loss(X, mask) + dsc_weight * dice_loss(X, mask)
         self.num_classes = num_classes
         self.smooth_weight = smooth_weight
         self.img_save_dir = img_save_dir
-        self.time_stamp = None
+        self.time_stamp = time_stamp
+        self.writer = writer
+        self.global_steps = {"train": 0, "eval": 0, "epoch": 0}
         if not self.notebook:
             assert self.img_save_dir is not None, "please specify a directory for saving images"
 
@@ -967,8 +972,15 @@ class AlternatingTrainer(object):
                                  f"loss-smooth: {losses['seg-smooth'][-1]:.4f}, "
                                  f"loss-all: {losses['seg-all'][-1]:.4f}")
 
+            self.writer.add_scalar("train_norm", losses["norm"][-1], self.global_steps["train"])
+            self.writer.add_scalar("train_loss_main", losses["seg-main"][-1], self.global_steps["train"])
+            self.writer.add_scalar("train_loss_smooth", losses["seg-smooth"][-1], self.global_steps["train"])
+            self.writer.add_scalar("train_loss_all", losses["seg-all"][-1], self.global_steps["train"])
+            self.global_steps["train"] += 1
+
         return losses
 
+    @torch.no_grad()
     def eval(self, loader="eval"):
         """
         After training for an epoch, alternating optimization should give currently optimal normalizer,
@@ -1007,10 +1019,15 @@ class AlternatingTrainer(object):
 
             pbar.set_description(f"{loader} batch {i + 1}/{len(data_loader)}: loss-all: {loss.item():.4f}")
 
-        return loss_acc / num_samples
+        loss_acc /= num_samples
+        self.writer.add_scalar("eval_loss_main", loss_acc, self.global_steps["eval"])
+        self.global_steps["eval"] += 1
+
+        return loss_acc
 
     def train(self, model_save_dir=None, if_plot=True):
-        time_stamp = self._create_save_folder(model_save_dir)
+        # time_stamp = self._create_save_folder(model_save_dir)
+        self._create_save_folder(model_save_dir)
         lowest_loss_all = float("inf")
         if self.notebook:
             from tqdm.notebook import trange
@@ -1032,10 +1049,14 @@ class AlternatingTrainer(object):
 
             if lowest_loss_all > eval_loss:
                 lowest_loss_all = eval_loss
-                self._save_latest_model(time_stamp, epoch, eval_loss, model_save_dir)
+                self._save_latest_model(self.time_stamp, epoch, eval_loss, model_save_dir)
 
             if if_plot:
                 self._eval_sample_plot(epoch)
+
+            self._write_norm_params()
+
+            self.global_steps["epoch"] += 1
 
         return train_losses, eval_losses
 
@@ -1044,28 +1065,33 @@ class AlternatingTrainer(object):
                                 self.normalizer.intermediate_channels).to(self.device)
         normalizer.load_state_dict(self.normalizer.state_dict())
         norm_optimizer = torch.optim.Adam(normalizer.parameters())
-        test_time_adapter = TestTimeAdapter(normalizer, self.u_net, norm_optimizer, self.loss_type, device=self.device)
         img_ind = np.random.randint(len(self.test_loader.dataset))
         X, mask_gt = self.test_loader.dataset[img_ind]  # (1, H, W), (1, H, W)
+        test_time_adapter = TestTimeAdapter(normalizer, self.u_net, norm_optimizer, self.loss_fn,
+                                            device=self.device, writer=self.writer, epoch=epoch)
         # (1, H, W) -> (1, 1, H, W)
         X = X.unsqueeze(0)
-        mask_pred, loss = test_time_adapter.predict(X)  # (1, H, W) -> (1, 1, H, W)
+        mask_gt = mask_gt.unsqueeze(0)
+        mask_pred, loss = test_time_adapter.predict(X, mask=mask_gt)  # (1, H, W) -> (1, 1, H, W)
         # print(mask_pred.shape)
-        loss_gt = dice_loss(mask_to_one_hot(mask_pred.unsqueeze(0), self.num_classes), mask_gt.unsqueeze(0),
+        loss_gt = dice_loss(mask_to_one_hot(mask_pred.unsqueeze(0), self.num_classes), mask_gt,
                             if_soft_max=False)
 
         figsize = plt.rcParams["figure.figsize"] if figsize is None else figsize
         fig, axes = plt.subplots(1, 3, figsize=figsize)
-        imgs = [X.detach().cpu().numpy()[0, 0], mask_pred[0], mask_gt[0]]
+        imgs = [X.detach().cpu().numpy()[0, 0], mask_pred[0], mask_gt[0, 0]]
         for axis, img in zip(axes, imgs):
             handle = axis.imshow(img, cmap="gray")
             plt.colorbar(handle, ax=axis)
         plt.suptitle(f"loss: {loss:.4f}, loss_gt: {loss_gt.item():.4f}")
         fig.tight_layout()
+
         if self.notebook:
             plt.show()
         else:
             plt.savefig(os.path.join(self.img_save_dir, self.time_stamp, f"epoch_{epoch + 1}.png"))
+
+        self.writer.add_figure("epoch_norm_check", fig, self.global_steps["epoch"])
 
     def _create_save_folder(self, model_save_dir=None):
         """
@@ -1079,9 +1105,9 @@ class AlternatingTrainer(object):
             os.mkdir(model_save_dir)
         original_wd = os.getcwd()
         os.chdir(model_save_dir)
-        time_stamp = f"{time.time()}".replace(".", "_")
-        self.time_stamp = time_stamp
-        os.mkdir(time_stamp)
+        # time_stamp = f"{time.time()}".replace(".", "_")
+        # self.time_stamp = time_stamp
+        os.mkdir(self.time_stamp)
         os.chdir(original_wd)
 
         if not self.notebook:
@@ -1089,10 +1115,10 @@ class AlternatingTrainer(object):
                 os.mkdir(self.img_save_dir)
             original_wd = os.getcwd()
             os.chdir(self.img_save_dir)
-            os.mkdir(time_stamp)
+            os.mkdir(self.time_stamp)
             os.chdir(original_wd)
 
-        return time_stamp
+        # return time_stamp
 
     def _save_latest_model(self, time_stamp, epoch, eval_loss, model_save_dir=None):
         # eval_loss; dict
@@ -1104,25 +1130,34 @@ class AlternatingTrainer(object):
         for filename in os.listdir():
             if os.path.isfile(filename):
                 os.remove(filename)
-        filename_common = f"{self.loss_type}_epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}"
+        # filename_common = f"{self.loss_type}_epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}"
+        filename_common = f"ce_{self.ce_weight}_dsc_{self.dsc_weight}_epoch_{epoch + 1}_eval_loss_{eval_loss:.4f}"
         filename_common = filename_common.replace(".", "_")
         filename_common += ".pt"
         torch.save(self.normalizer.state_dict(), "norm_" + filename_common)
         torch.save(self.u_net.state_dict(), "u_net_" + filename_common)
         os.chdir(original_wd)
 
+    def _write_norm_params(self):
+        for i, layer in enumerate(self.normalizer.conv_layers):
+            self.writer.add_histogram(f"norm_param_{i}", layer.weight, self.global_steps["epoch"])
+
 
 class TestTimeAdapter(object):
-    def __init__(self, normalizer, u_net, norm_optimizer, loss_type, device=None):
-        assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
+    def __init__(self, normalizer, u_net, norm_optimizer, loss_fn, device=None,
+                 writer: SummaryWriter = None, epoch=None):
+        # assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
         self.normalizer = normalizer
         self.u_net = u_net
         self.norm_optimizer = norm_optimizer
-        self.loss_type = loss_type
-        self.loss_fn = cross_entropy_loss if loss_type == "CE" else dice_loss
+        # self.loss_type = loss_type
+        self.loss_fn = loss_fn
         self.device = torch.device("cuda") if device is None else device
+        self.writer = writer
+        self.epoch = epoch
+        self.global_steps = 0
 
-    def predict(self, X, rel_eps=0.05, max_iters=15):
+    def predict(self, X, mask=None, rel_eps=0.05, max_iters=15):
         # X: (1, 1, H, W)
         X = (2 * X - 1).to(self.device)
         self.normalizer.train()
@@ -1140,6 +1175,15 @@ class TestTimeAdapter(object):
             cur_loss = next_loss
             next_loss = self._compute_loss(X)
             num_iters += 1
+            print(f"rel: {abs((next_loss.item() - cur_loss.item()) / cur_loss.item())}")
+
+            if self.writer is not None:
+                self.writer.add_scalar(f"epoch_{self.epoch}_adapt", cur_loss.item(), self.global_steps)
+                fig = make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
+                                        X_in=X[0], mask_in=mask[0], device=self.device,
+                                        figsize=(10.8, 7.2), fraction=0.5)
+                self.writer.add_figure(f"epoch_{self.epoch}_adapt_fig", fig, self.global_steps)
+                self.global_steps += 1
 
         self.normalizer.eval()
         X_norm = self.normalizer(X)

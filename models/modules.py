@@ -455,6 +455,7 @@ class Normalizer(nn.Module):
                        nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size, padding=padding)]
         layers += [nn.ReLU(), nn.Conv2d(intermediate_channels, 1, kernel_size, padding=padding)]
         self.layers = nn.Sequential(*layers)
+        self.conv_layers = [layer for layer in layers if isinstance(layer, nn.Conv2d)]
 
     def forward(self, x):
         # x: (B, C, H, W)
