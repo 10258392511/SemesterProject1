@@ -24,9 +24,10 @@ def make_bash_script(ce, dsc, smooth_weight):
     python ./run_alternating_opt.py --dataset_name "csf" \
     --dataset_root "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" \
     --device "cuda" --batch_size 6 --num_workers 2 --model_save_dir "./params/norm_u_net" \
-    --eval_plot_save_dir "./images/norm_u_net --epochs 20 --ce_weight {ce} --dsc_weight {dsc} \
-    --smooth_weight {smooth_weight}"
+    --eval_plot_save_dir "./images/norm_u_net" --epochs 20 --ce_weight {ce} --dsc_weight {dsc} \
+    --smooth_weight {smooth_weight}
     """
+    # print(bash_script)
 
     return bash_script
 
@@ -38,4 +39,6 @@ if __name__ == '__main__':
         for smooth_weight in smooth_weights:
             ce, dsc = loss_weight["ce"], loss_weight["dsc"]
             bash_script = make_bash_script(ce, dsc, smooth_weight)
-            subprocess.run(bash_script, shell=True)
+            filename = f"ce_{ce}_dsc_{dsc}_s_{smooth_weight}".replace(".", "_")
+            # subprocess.run(f"touch {filename}.sh", shell=True)
+            subprocess.run(f"echo {bash_script} > {filename}.sh", shell=True)
