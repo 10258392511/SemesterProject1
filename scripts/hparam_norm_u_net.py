@@ -29,7 +29,7 @@ python ./run_alternating_opt.py --dataset_name "csf" --dataset_root "/itet-stor/
 
 if __name__ == '__main__':
     loss_weights = [{"ce": 1, "dsc": 0}, {"ce": 0.5, "dsc": 0.5}, {"ce": 0, "dsc": 1}]
-    smooth_weights = [1, 0.1, 0.01]
+    smooth_weights = [0.01]
     for loss_weight in loss_weights:
         for smooth_weight in smooth_weights:
             ce, dsc = loss_weight["ce"], loss_weight["dsc"]
