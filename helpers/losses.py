@@ -27,11 +27,11 @@ def dice_loss(X, mask, if_soft_max=True, eps=1e-10):
         X1 = F.softmax(X, dim=1)  # (B, K, H, W)
     else:
         X1 = X
-    X1_reduced = X1.sum(dim=[1, 2])  # (B, K)
+    X1_reduced = X1.sum(dim=[2, 3])  # (B, K)
     mask1 = mask_to_one_hot(mask, num_classes)  # (B, K, H, W)
     X2 = X1 * mask1  # (B, K, H, W)
-    X2_reduced = X2.sum(dim=[1, 2])  # (B, K)
-    mask_reduced = mask1.sum(dim=[1, 2])
+    X2_reduced = X2.sum(dim=[2, 3])  # (B, K)
+    mask_reduced = mask1.sum(dim=[2, 3])
     # remove background
     loss = (1 - (2 * X2_reduced[:, 1:]) / (X1_reduced[:, 1:] + mask_reduced[:, 1:] + eps)).mean()  # float
 
