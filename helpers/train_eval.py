@@ -1166,6 +1166,14 @@ class TestTimeAdapter(object):
         next_loss = self._compute_loss(X)
         num_iters = 1
 
+        if self.writer is not None:
+            self.writer.add_scalar(f"epoch_{self.epoch}_adapt", next_loss.item(), self.global_steps)
+            fig = make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
+                                    X_in=X[0], mask_in=mask[0], device=self.device,
+                                    figsize=(10.8, 7.2), fraction=0.5)
+            self.writer.add_figure(f"epoch_{self.epoch}_adapt_fig", fig, self.global_steps)
+            self.global_steps += 1
+
         while (cur_loss is None) or abs((next_loss.item() - cur_loss.item()) / cur_loss.item()) > rel_eps:
             if num_iters > max_iters:
                 break
@@ -1178,7 +1186,7 @@ class TestTimeAdapter(object):
             print(f"rel: {abs((next_loss.item() - cur_loss.item()) / cur_loss.item())}")
 
             if self.writer is not None:
-                self.writer.add_scalar(f"epoch_{self.epoch}_adapt", cur_loss.item(), self.global_steps)
+                self.writer.add_scalar(f"epoch_{self.epoch}_adapt", next_loss.item(), self.global_steps)
                 fig = make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
                                         X_in=X[0], mask_in=mask[0], device=self.device,
                                         figsize=(10.8, 7.2), fraction=0.5)
