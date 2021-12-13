@@ -33,7 +33,7 @@ def dice_loss(X, mask, if_soft_max=True, eps=1e-10):
     X2_reduced = X2.sum(dim=[2, 3])  # (B, K)
     mask_reduced = mask1.sum(dim=[2, 3])
     # remove background
-    loss = (1 - (2 * X2_reduced[:, 1:]) / (X1_reduced[:, 1:] + mask_reduced[:, 1:] + eps)).mean()  # float
+    loss = 1 - ((2 * X2_reduced) / (X1_reduced + mask_reduced + eps)).mean()  # float
 
     return loss
 

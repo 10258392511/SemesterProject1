@@ -230,7 +230,7 @@ def get_transforms():
 
 @torch.no_grad()
 def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, suptitle="",
-                      if_save=True, X_in=None, mask_in=None, **kwargs):
+                      if_save=True, X_in=None, mask_in=None, if_show=False, **kwargs):
     u_net.eval()
     normalizer.eval()
     figsize = kwargs.get("figsize", plt.rcParams["figure.figsize"])
@@ -265,6 +265,9 @@ def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, supt
     if if_save:
         assert image_save_path is not None, "please specify a saving path"
         plt.savefig(image_save_path)
+
+    if if_show:
+        plt.show()
 
     return fig
 

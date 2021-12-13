@@ -1017,6 +1017,10 @@ class AlternatingTrainer(object):
             loss_acc += loss.item() * X.shape[0]
             num_samples += X.shape[0]
 
+            mask_pred_debug = self.u_net(X)
+            loss_debug = self.loss_fn(mask_pred_debug, mask)
+            print(f"inside .eval(): loss: {loss_debug}")
+
             pbar.set_description(f"{loader} batch {i + 1}/{len(data_loader)}: loss-all: {loss.item():.4f}")
 
         loss_acc /= num_samples
@@ -1057,6 +1061,8 @@ class AlternatingTrainer(object):
             self._write_norm_params()
 
             self.global_steps["epoch"] += 1
+            print(f"epoch {epoch + 1}/{self.epochs}: train loss: {train_loss['seg-main'][-1]:.4f}, "
+                  f"eval loss: {eval_loss:.4f}")
 
         return train_losses, eval_losses
 
@@ -1068,7 +1074,7 @@ class AlternatingTrainer(object):
         img_ind = np.random.randint(len(self.test_loader.dataset))
         X, mask_gt = self.test_loader.dataset[img_ind]  # (1, H, W), (1, H, W)
         test_time_adapter = TestTimeAdapter(normalizer, self.u_net, norm_optimizer, self.loss_fn,
-                                            device=self.device, writer=self.writer, epoch=epoch)
+                                            device=self.device, writer=self.writer, epoch=epoch, notebook=self.notebook)
         # (1, H, W) -> (1, 1, H, W)
         X = X.unsqueeze(0)
         mask_gt = mask_gt.unsqueeze(0)
@@ -1145,7 +1151,7 @@ class AlternatingTrainer(object):
 
 class TestTimeAdapter(object):
     def __init__(self, normalizer, u_net, norm_optimizer, loss_fn, device=None,
-                 writer: SummaryWriter = None, epoch=None):
+                 writer: SummaryWriter = None, epoch=None, notebook=False):
         # assert loss_type in ["CE", "DSC"], "only supports CE and DSC"
         self.normalizer = normalizer
         self.u_net = u_net
@@ -1156,6 +1162,7 @@ class TestTimeAdapter(object):
         self.writer = writer
         self.epoch = epoch
         self.global_steps = 0
+        self.notebook = notebook
 
     def predict(self, X, mask=None, rel_eps=0.05, max_iters=15):
         # X: (1, 1, H, W)
@@ -1167,12 +1174,17 @@ class TestTimeAdapter(object):
         num_iters = 1
 
         if self.writer is not None:
-            self.writer.add_scalar(f"epoch_{self.epoch}_adapt", next_loss.item(), self.global_steps)
-            fig = make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
-                                    X_in=X[0], mask_in=mask[0], device=self.device,
-                                    figsize=(10.8, 7.2), fraction=0.5)
-            self.writer.add_figure(f"epoch_{self.epoch}_adapt_fig", fig, self.global_steps)
-            self.global_steps += 1
+            with torch.no_grad():
+                self.writer.add_scalar(f"epoch_{self.epoch}_adapt", next_loss.item(), self.global_steps)
+                fig = make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
+                                        X_in=X[0], mask_in=mask[0], device=self.device,
+                                        figsize=(10.8, 7.2), fraction=0.5)
+                self.writer.add_figure(f"epoch_{self.epoch}_adapt_fig", fig, self.global_steps)
+                self.global_steps += 1
+                if self.notebook:
+                    make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
+                                      X_in=X[0], mask_in=mask[0], device=self.device,
+                                      figsize=(10.8, 7.2), fraction=0.5, if_show=True)
 
         while (cur_loss is None) or abs((next_loss.item() - cur_loss.item()) / cur_loss.item()) > rel_eps:
             if num_iters > max_iters:
@@ -1186,12 +1198,13 @@ class TestTimeAdapter(object):
             print(f"rel: {abs((next_loss.item() - cur_loss.item()) / cur_loss.item())}")
 
             if self.writer is not None:
-                self.writer.add_scalar(f"epoch_{self.epoch}_adapt", next_loss.item(), self.global_steps)
-                fig = make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
-                                        X_in=X[0], mask_in=mask[0], device=self.device,
-                                        figsize=(10.8, 7.2), fraction=0.5)
-                self.writer.add_figure(f"epoch_{self.epoch}_adapt_fig", fig, self.global_steps)
-                self.global_steps += 1
+                with torch.no_grad():
+                    self.writer.add_scalar(f"epoch_{self.epoch}_adapt", next_loss.item(), self.global_steps)
+                    fig = make_summary_plot(self.u_net, self.normalizer, None, if_save=False,
+                                            X_in=X[0], mask_in=mask[0], device=self.device,
+                                            figsize=(10.8, 7.2), fraction=0.5)
+                    self.writer.add_figure(f"epoch_{self.epoch}_adapt_fig", fig, self.global_steps)
+                    self.global_steps += 1
 
         self.normalizer.eval()
         X_norm = self.normalizer(X)
@@ -1209,3 +1222,126 @@ class TestTimeAdapter(object):
         loss = symmetric_loss(mask_pred, mask_norm_pred, self.loss_fn)
 
         return loss
+
+
+class UNetTrainer(object):
+    def __init__(self, train_loader, eval_loader, model, optimizer, scheduler=None, ce_weight=1, dsc_weight=0,
+                 epochs=20, notebook=True, device=None, writer: SummaryWriter = None):
+        self.train_loader = train_loader
+        self.eval_loader = eval_loader
+        self.epochs = epochs
+        self.model = model
+        self.optimizer = optimizer
+        self.scheduler = scheduler
+        self.ce_weight = ce_weight
+        self.dsc_weight = dsc_weight
+        self.loss_fn = lambda X, mask: ce_weight * cross_entropy_loss(X, mask) + dsc_weight * dice_loss(X, mask)
+        self.notebook = notebook
+        self.device = torch.device("cuda") if device is None else device
+        self.writer = writer
+        self.global_steps = {"train": 0, "eval": 0, "epoch": 0}
+
+    def _train(self):
+        self.model.train()
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
+        losses = []
+        for i, (X, _, mask) in pbar:
+            # X: (B, 1, 256, 256)
+            X = X.float().to(self.device)
+            mask = mask.to(self.device)
+            X = 2 * X - 1
+            mask_pred = self.model(X)
+            loss = self.loss_fn(mask_pred, mask)
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+            losses.append(loss.item())
+            self.writer.add_scalar("train_loss", losses[-1], self.global_steps["train"])
+            self.global_steps["train"] += 1
+
+            pbar.set_description(f"training batch {i + 1}/{len(self.train_loader)}: loss: {losses[-1]}")
+
+        return losses
+
+    @torch.no_grad()
+    def _eval(self):
+        self.model.eval()
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.eval_loader), total=len(self.eval_loader), desc="eval", leave=False)
+        loss_acc = 0
+        num_samples = 0
+        for i, (X, mask) in pbar:
+            # X: (B, 1, 256, 256)
+            X = X.float().to(self.device)
+            mask = mask.to(self.device)
+            X = 2 * X - 1
+            mask_pred = self.model(X)
+            loss = self.loss_fn(mask_pred, mask)
+            loss_acc += loss.item() * X.shape[0]
+            num_samples += X.shape[0]
+
+            pbar.set_description(f"eval batch {i + 1}/{len(self.eval_loader)}: loss: {loss.item()}")
+
+        loss_acc /= num_samples
+        self.writer.add_scalar("eval_loss", loss_acc, self.global_steps["eval"])
+        self.global_steps["eval"] += 1
+
+        return loss_acc
+
+    def train(self):
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
+        pbar = trange(self.epochs, desc="epochs")
+
+        train_losses, eval_losses = [], []
+        for epoch in pbar:
+            train_loss = self._train()
+            eval_loss = self._eval()
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+            train_losses.append(train_loss)
+            eval_losses.append(eval_loss)
+
+            pbar.set_description(f"epoch {epoch + 1}/{self.epochs}: train loss {train_loss[-1]:.4f}, "
+                                 f"eval loss: {eval_loss:.4f}")
+
+            self.writer.add_scalar("epoch_train", train_loss[-1], self.global_steps["epoch"])
+            self.writer.add_scalar("epoch_eval", eval_loss, self.global_steps["epoch"])
+
+            self._eval_plot()
+
+            self.global_steps["epoch"] += 1
+
+        return train_losses, eval_losses
+
+    @torch.no_grad()
+    def _eval_plot(self):
+        index = np.random.randint(len(self.eval_loader.dataset))
+        X, mask = self.eval_loader.dataset[index]  # (1, 256, 256) each
+        X = X.float().to(self.device)
+        mask = mask.to(self.device)
+        X = 2 * X - 1
+        X = X.unsqueeze(0)  # (1, 1, 256, 256)
+        mask = mask.unsqueeze(0)
+        mask_pred = self.model(X)
+        loss = self.loss_fn(mask_pred, mask)  # (1, K, 256, 256), (1, 1, 256, 256)
+        mask_pred = mask_pred.argmax(dim=1)  # (1, K, 256, 256) -> (1, 256, 256)
+        fig, axes = plt.subplots(1, 3, figsize=(10.8, 7.2))
+        for img_iter, axis in zip([X[0, 0], mask_pred[0], mask[0, 0]], axes):
+            handle = axis.imshow(img_iter.detach().cpu().numpy(), cmap="gray")
+            plt.colorbar(handle, ax=axis)
+        fig.suptitle(f"loss: {loss:.4f}")
+        if self.notebook:
+            plt.show()
+        self.writer.add_figure("epoch_img", fig, self.global_steps["epoch"])
