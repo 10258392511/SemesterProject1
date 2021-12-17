@@ -1359,17 +1359,22 @@ class TestTimeEvaluator(object):
         self.writer = writer
         self.notebook = notebook
         self.global_step = 0
+        self.index = np.random.randint(len(self.test_loader.dataset))
 
     def adapt(self, max_iter=15, rel_error=1e-5):
         # Store both values of self.loss_fn and DICE; randomly sample one image
         # TODO: Save scalars (decide which to save)
         self.u_net.eval()
         self.normalizer.train()
-        index = np.random.randint(len(self.test_loader.dataset))
-        X, mask = self.test_loader.dataset[index]
-        X = X.float().to(self.device)  # (B, 1, H, W)
+        # index = np.random.randint(len(self.test_loader.dataset))
+        X, mask = self.test_loader.dataset[self.index]
+        X = X.float().to(self.device)  # (1, H, W)
+        X_orig = X
         X = 2 * X - 1
-        mask = mask.to(self.device)  # (B, 1, H, W)
+        mask = mask.to(self.device)  # (1, H, W)
+        mask_orig = mask
+        X = X.unsqueeze(0)  # (1, 1, H, W)
+        mask = mask.unsqueeze(0)
 
         loss_adapt, loss_norm, loss_no_norm = self._compute_loss(X, mask)
         self.writer.add_scalar("loss_norm", loss_norm.item(), self.global_step)
@@ -1379,7 +1384,8 @@ class TestTimeEvaluator(object):
                    f"loss_adapt: {loss_adapt.item():.4f}"
         with torch.no_grad():
             fig = make_summary_plot(self.u_net, self.normalizer, self.test_loader, suptitle=suptitle, if_save=False,
-                                    X_in=X, mask_in=mask)
+                                    X_in=X_orig, mask_in=mask_orig, if_show=True, figsize=(10.8, 7.2),
+                                    fraction=0.5)
             self.writer.add_figure("img_adaption", fig, self.global_step)
         self.global_step += 1
 
@@ -1387,7 +1393,11 @@ class TestTimeEvaluator(object):
         next_loss = loss_adapt
         rel = None
 
+        counter = 0
         while (cur_loss is None) or rel >= rel_error:
+            if counter > max_iter:
+                break
+            counter += 1
             self.norm_optimizer.zero_grad()
             next_loss.backward()
             self.norm_optimizer.step()
@@ -1400,7 +1410,8 @@ class TestTimeEvaluator(object):
                        f"loss_adapt: {loss_adapt.item():.4f}"
             with torch.no_grad():
                 fig = make_summary_plot(self.u_net, self.normalizer, self.test_loader, suptitle=suptitle, if_save=False,
-                                        X_in=X, mask_in=mask)
+                                        X_in=X_orig, mask_in=mask_orig, if_show=True, figsize=(10.8, 7.2),
+                                        fraction=0.5)
                 self.writer.add_figure("img_adaption", fig, self.global_step)
 
             cur_loss = next_loss
