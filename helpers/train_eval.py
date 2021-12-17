@@ -1345,3 +1345,110 @@ class UNetTrainer(object):
         if self.notebook:
             plt.show()
         self.writer.add_figure("epoch_img", fig, self.global_steps["epoch"])
+
+
+class TestTimeEvaluator(object):
+    def __init__(self, test_loader, normalizer, u_net, norm_optimizer, loss_fn, writer: SummaryWriter,
+                 device=None, notebook=False):
+        self.test_loader = test_loader
+        self.normalizer = normalizer
+        self.u_net = u_net
+        self.norm_optimizer = norm_optimizer
+        self.loss_fn = loss_fn
+        self.device = torch.device("cuda") if device is None else device
+        self.writer = writer
+        self.notebook = notebook
+        self.global_step = 0
+
+    def adapt(self, max_iter=15, rel_error=1e-5):
+        # Store both values of self.loss_fn and DICE; randomly sample one image
+        # TODO: Save scalars (decide which to save)
+        self.u_net.eval()
+        self.normalizer.train()
+        index = np.random.randint(len(self.test_loader.dataset))
+        X, mask = self.test_loader.dataset[index]
+        X = X.float().to(self.device)  # (B, 1, H, W)
+        X = 2 * X - 1
+        mask = mask.to(self.device)  # (B, 1, H, W)
+
+        loss_adapt, loss_norm, loss_no_norm = self._compute_loss(X, mask)
+        self.writer.add_scalar("loss_norm", loss_norm.item(), self.global_step)
+        self.writer.add_scalar("loss_no_norm", loss_no_norm.item(), self.global_step)
+        self.writer.add_scalar("loss_adapt", loss_adapt.item(), self.global_step)
+        suptitle = f"loss_norm: {loss_norm.item():.4f}, loss_no_norm: {loss_no_norm.item():.4f}, " \
+                   f"loss_adapt: {loss_adapt.item():.4f}"
+        with torch.no_grad():
+            fig = make_summary_plot(self.u_net, self.normalizer, self.test_loader, suptitle=suptitle, if_save=False,
+                                    X_in=X, mask_in=mask)
+            self.writer.add_figure("img_adaption", fig, self.global_step)
+        self.global_step += 1
+
+        cur_loss = None
+        next_loss = loss_adapt
+        rel = None
+
+        while (cur_loss is None) or rel >= rel_error:
+            self.norm_optimizer.zero_grad()
+            next_loss.backward()
+            self.norm_optimizer.step()
+
+            loss_adapt, loss_norm, loss_no_norm = self._compute_loss(X, mask)
+            self.writer.add_scalar("loss_norm", loss_norm.item(), self.global_step)
+            self.writer.add_scalar("loss_no_norm", loss_no_norm.item(), self.global_step)
+            self.writer.add_scalar("loss_adapt", loss_adapt.item(), self.global_step)
+            suptitle = f"loss_norm: {loss_norm.item():.4f}, loss_no_norm: {loss_no_norm.item():.4f}, " \
+                       f"loss_adapt: {loss_adapt.item():.4f}"
+            with torch.no_grad():
+                fig = make_summary_plot(self.u_net, self.normalizer, self.test_loader, suptitle=suptitle, if_save=False,
+                                        X_in=X, mask_in=mask)
+                self.writer.add_figure("img_adaption", fig, self.global_step)
+
+            cur_loss = next_loss
+            next_loss = loss_adapt
+
+            rel = abs((next_loss.item() - cur_loss.item()) / cur_loss.item())
+            self.writer.add_scalar("rel_error", rel, self.global_step)
+            self.global_step += 1
+
+    def _compute_loss(self, X, mask):
+        # X, mask: (1, 1, H, W); X: (2 * X - 1).float().to(self.device)
+        with torch.no_grad():
+            mask_pred_no_norm = self.u_net(X)  # (1, 1, H, W)
+            loss_no_norm = dice_loss(mask_pred_no_norm, mask)
+            mask_pred_norm = self.u_net(self.normalizer(X))
+            loss_norm = dice_loss(mask_pred_norm, mask)
+
+        mask_pred_no_norm_adapt = self.u_net(X)
+        mask_pred_norm_adapt = self.u_net(self.normalizer(X))
+        loss_adapt = symmetric_loss(mask_pred_no_norm_adapt, mask_pred_norm_adapt, self.loss_fn)
+
+        return loss_adapt, loss_norm, loss_no_norm
+
+    @torch.no_grad()
+    def eval(self, if_normalize=True):
+        # Only DICE; given gt
+        # Store 2 values in SummaryWriter with and without normalizer in wrapper func
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.test_loader), desc="Evaluation", total=len(self.test_loader))
+
+        loss_avg = 0
+        num_samples = 0
+        for i, (X, mask) in pbar:
+            X = X.float().to(self.device)  # (B, 1, H, W)
+            X = 2 * X - 1
+            mask = mask.to(self.device)  # (B, 1, H, W)
+
+            if if_normalize:
+                X = self.normalizer(X)
+
+            mask_pred = self.u_net(X)  # (B, 1, H, W)
+            loss = dice_loss(mask_pred, mask)
+            loss_avg += loss.item() * X.shape[0]
+            num_samples += X.shape[0]
+
+            pbar.set_description(f"Batch {i + 1}/{len(self.test_loader)}: loss: {loss.item():.4f}")
+
+        return loss_avg / num_samples
