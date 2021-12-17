@@ -228,6 +228,15 @@ def get_transforms():
     return options
 
 
+def get_separated_transforms():
+    options = [A.RandomCrop(224, 224, p=0.5), A.Flip(p=0.5), A.ElasticTransform(alpha=50, alpha_affine=0, p=0.5),
+               A.Affine(scale=(0.8, 1.0), translate_percent=(0.0, 0.3), rotate=(-25, 25), shear=(-25, 25), p=0.5),
+               A.RandomGamma((50, 150), p=0.5), A.GaussNoise(var_limit=(0, 1), mean=0, p=0.5),
+               A.GaussianBlur(blur_limit=(3, 7), sigma_limit=0, p=0.5)]
+
+    return options
+
+
 @torch.no_grad()
 def make_summary_plot(u_net, normalizer, test_loader, image_save_path=None, suptitle="",
                       if_save=True, X_in=None, mask_in=None, if_show=False, **kwargs):
