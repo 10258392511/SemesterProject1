@@ -9,7 +9,8 @@ import os
 # -root
 # --csf
 # ---train
-# ----img1, mask1, ...
+# ----vol1, mask1, ...
+
 
 def read_patient_id(data_path_root):
     csv_files = {"csf": "mnms_csf.csv", "hvhd": "mnms_hvhd.csv", "uhe": "mnms_uhe.csv"}
@@ -46,10 +47,9 @@ def create_leaf(group: h5py.Group, patient_id_list: list, data_dir):
             img = img.get_fdata()
             mask = mask.get_fdata()
             assert img.shape == mask.shape, "shape doesn't match"
-            for z in range(img.shape[-1]):
-                group.create_dataset(f"img{counter}", data=img[..., z], compression="gzip", compression_opts=9)
-                group.create_dataset(f"mask{counter}", data=mask[..., z], compression="gzip", compression_opts=9)
-                counter += 1
+            group.create_dataset(f"img{counter}", data=img, compression="gzip", compression_opts=9)
+            group.create_dataset(f"mask{counter}", data=mask, compression="gzip", compression_opts=9)
+            counter += 1
             group.attrs["SIZE"] = counter
 
 
@@ -66,7 +66,7 @@ if __name__ == '__main__':
 
     patient_id_dict = read_patient_id(args.input_dir)
     data_dir = os.path.join(args.input_dir, "images_corrected")
-    with h5py.File(f"{args.output_dir}/MnMs_extracted.h5", "w") as hdf:
+    with h5py.File(f"{args.output_dir}/MnMs_extracted_3d.h5", "w") as hdf:
         for scanner in scanners:
             group = hdf.create_group(scanner)
             create_subtree(group, patient_id_dict[scanner], split_info[scanner], data_dir)

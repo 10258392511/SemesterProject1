@@ -7,6 +7,7 @@ import nibabel as nib
 import albumentations as A
 import os
 import h5py
+import torchvision.transforms
 
 from torch.utils.data import Dataset, DataLoader
 from torchvision.datasets import MNIST
@@ -431,5 +432,90 @@ class MnMsHDF5SimplifiedDataset(Dataset):
         for i, img_iter in enumerate(imgs):
             handle = axes[i].imshow(img_iter, cmap="gray")
             plt.colorbar(handle, ax=axes[i], fraction=0.1)
+        fig.tight_layout()
+        plt.show()
+
+
+class MnMs3DDataset(Dataset):
+    """
+    Mainly for testing with 3D dice loss.
+
+    File hierarchy:
+
+    root
+    -csf
+    --train
+    ---img0
+    ---mask0
+    --eval
+    --test
+    ...
+    """
+    def __init__(self, data_path, source_name, mode, target_size=(256, 256), if_augment=False):
+        super(MnMs3DDataset, self).__init__()
+        assert ".h5" in data_path, "data_path must be a hdf5 file"
+        assert source_name in ["csf", "hvhd", "uhe"], "invalid source name"
+        assert mode in ["train", "eval", "test"], "invalid mode"
+
+        self.data_path = data_path
+        self.source_name = source_name
+        self.mode = mode
+        # self.transforms = transforms  # torchvision.transforms
+        self.target_size = target_size
+        # self.if_augment = if_augment
+
+    def __len__(self):
+        with h5py.File(self.data_path, "r") as hdf:
+            group_source = hdf.get(self.source_name)
+            group_data_mode = group_source.get(self.mode)
+
+            return group_data_mode.attrs["SIZE"]
+
+    def __getitem__(self, index):
+        assert 0 <= index < self.__len__()
+        with h5py.File(self.data_path, "r") as hdf:
+            group_source = hdf.get(self.source_name)
+            group_data_mode = group_source.get(self.mode)
+
+            # (H, W, D)
+            img, mask = np.array(group_data_mode.get(f"img{index}")), np.array(group_data_mode.get(f"mask{index}"))
+            # Normalize img
+            for d in range(img.shape[-1]):
+                img[..., d] = normalize(img[..., d], norm_type="div_by_max")
+
+            # (H, W, D) -> (D, H, W)
+            img, mask = torch.FloatTensor(img), torch.FloatTensor(mask)
+            img, mask = img.permute(2, 0, 1), mask.permute(2, 0, 1)
+
+        # if self.mode == "train" and self.if_augment:
+        #     transform = torchvision.transforms.Compose(self.transforms)
+        #     transformed = transform(image=img, mask=mask)
+        #     img, mask = transformed["image"], transformed["mask"]
+        #
+        #     resizer = A.Resize(*self.target_size, always_apply=True)
+        #     transformed = resizer(image=img, mask=mask)
+        #     img, mask = transformed["image"], transformed["mask"]
+        #
+        #     # (1, H, W), (1, H, W)
+        #     return torch.FloatTensor(img).unsqueeze(0), torch.LongTensor(mask).unsqueeze(0)
+
+        # else:
+        resizer = Resize(self.target_size)
+        # transformed = resizer(image=img, mask=mask)
+        img, mask = resizer(img), resizer(mask)
+        mask = mask.long()
+
+        # (1, D, H, W), (1, D, H, W)
+        return img.unsqueeze(0), mask.unsqueeze(0)
+
+    def plot_pair(self, img, mask, figsize=None):
+        # img, mask: (D, H, W)
+        D, H, W = img.shape
+        figsize = plt.rcParams["figure.figsize"] if figsize is None else figsize
+        fig, axes = plt.subplots(D, 2, figsize=figsize)
+        for i in range(D):
+            for j, img_iter in enumerate([img[i], mask[i]]):
+                handle = axes[i, j].imshow(img_iter, cmap="gray")
+                plt.colorbar(handle, ax=axes[i, j], fraction=0.1)
         fig.tight_layout()
         plt.show()
