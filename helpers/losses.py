@@ -47,3 +47,23 @@ def symmetric_loss(X1, X2, loss_fn):
     loss2 = loss_fn(X2, mask1.detach().argmax(dim=1, keepdims=True))
 
     return (loss1 + loss2) / 2
+
+
+def dice_loss_3d(X, mask, num_classes=4, if_soft_max=True, with_bg=False):
+    """
+    X, mask: (D, C, H, W), (D, H, W)
+    """
+    mask_one_hot = mask_to_one_hot(mask.unsqueeze(1), num_classes)  # (D, C, H, W)
+    if if_soft_max:
+        X = F.softmax(X, dim=1)  # (D, C, H, W)
+    X_intersect = X * mask_one_hot  # (D, C, H, W)
+    X_intersect_reduced = X_intersect.sum(dim=[0, 2, 3])  # (C,)
+    X_reduced = X.sum(dim=[0, 2, 3])  # (C,)
+    mask_reduced = mask_one_hot.sum(dim=[0, 2, 3])  # (C,)
+    if with_bg:
+        start_index = 0
+    else:
+        start_index = 1
+    loss = 1 - (2 * X_intersect_reduced[start_index:] / (X_reduced[start_index:] + mask_reduced[start_index:])).mean()
+
+    return loss
