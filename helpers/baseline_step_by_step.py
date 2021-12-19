@@ -68,7 +68,7 @@ def make_summary_plot_simplified(X, mask, normalizer, u_net, if_show=False,
 
     figsize = kwargs.get("figsize", (10.8, 7.2))
     fraction = kwargs.get("fraction", 0.5)
-    fig, axes = plt.subplots(2, 3, figsize)
+    fig, axes = plt.subplots(2, 3, figsize=figsize)
     img_grid = [[X_orig[0, 0], mask[0, 0], mask_direct_pred[0]],
                 [X_norm_plot[0, 0], X_norm_diff[0, 0], mask_norm_pred[0]]]
     title_grid = [["orig", "gt", "direct pred"],
@@ -137,8 +137,8 @@ class BasicTrainer(object):
     @torch.no_grad()
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))
-        X, mask = self.test_loader.dataset[ind]  # (1, 1, H, W), (1, 1, H, W)
-        fig = make_summary_plot_simplified(X, mask, self.normalizer, self.u_net,
+        X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
+        fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
                                            if_show=self.notebook, device=self.device)
         return fig
 
@@ -149,13 +149,13 @@ class BasicTrainer(object):
 
     def _save_params(self, epoch, eval_loss):
         dir_path = os.path.join(self.param_save_dir, self.time_stamp)
-        for filename in os.listdir(dir_path):
-            if os.path.isfile(filename):
-                filename_abs = os.path.join(dir_path, filename)
-                os.remove(filename_abs)
-        filename_common = f"_epoch_{epoch}_eval_loss_{eval_loss:.4f}".replace(".", "_") + ".pt"
-        torch.save(self.normalizer.state_dict(), f"norm_{filename_common}")
-        torch.save(self.u_net.state_dict(), f"u_net_{filename_common}")
+        # for filename in os.listdir(dir_path):
+        #     if os.path.isfile(filename):
+        #         filename_abs = os.path.join(dir_path, filename)
+        #         os.remove(filename_abs)
+        filename_common = f"epoch_{epoch}_eval_loss_{eval_loss:.4f}".replace(".", "_") + ".pt"
+        torch.save(self.normalizer.state_dict(), f"{dir_path}/norm_{filename_common}")
+        torch.save(self.u_net.state_dict(), f"{dir_path}/u_net_{filename_common}")
 
 
 class OnePassTrainer(BasicTrainer):
@@ -174,6 +174,10 @@ class OnePassTrainer(BasicTrainer):
         pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
 
         for i, (X, mask) in pbar:
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -208,6 +212,10 @@ class OnePassTrainer(BasicTrainer):
         loss_sup_avg, loss_unsup_avg = 0, 0
         num_samples = 0
         for i, (X, mask) in pbar:
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -264,19 +272,19 @@ class OnePassTrainer(BasicTrainer):
 
             eval_3d_loss_desc = ""
             for key in losses_eval_3d:
-                eval_3d_loss_desc += f", loss_3d_{key}: {losses_eval_3d[key]}"
+                eval_3d_loss_desc += f", loss_3d_{key}: {losses_eval_3d[key]:.4f}"
             pbar.set_description(f"epoch {epoch + 1}/{self.epochs}, loss_all: {loss_all_avg:4f}" + eval_3d_loss_desc)
             self.global_steps["epoch"] += 1
 
     def _compute_normalizer_loss(self, X, mask):
         # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
         X = 2 * X - 1
-        mask_pred_direct = self.u_net(X)  # (1, C, H, W)
-        X_norm = self.normalizer(X)  # (1, 1, H, W)
-        mask_pred_norm = self.u_net(X_norm)  # (1, C, H, W)
+        mask_pred_direct = self.u_net(X)  # (B, C, H, W)
+        X_norm = self.normalizer(X)  # (B, 1, H, W)
+        mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
-        loss_sup = loss_fn(X, mask)
+        loss_sup = loss_fn(mask_pred_norm, mask)
         loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
 
         return loss_sup, loss_unsup
@@ -291,25 +299,142 @@ class AltTrainer(BasicTrainer):
         self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
 
     def _train(self):
-        pass
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
+
+        for i, (X, mask) in pbar:
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
+            X = X.to(self.device)
+            mask = mask.to(self.device)
+
+            # update self.u_net
+            self.normalizer.eval()
+            self.u_net.train()
+            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            loss_all = loss_sup + loss_unsup
+            self.u_net_opt.zero_grad()
+            loss_all.backward()
+            self.u_net_opt.step()
+            loss_sup_u_net, loss_unsup_u_net, loss_all_u_net = loss_sup.item(), loss_unsup.item(), loss_all.item()
+
+            # update self.normalizer
+            self.u_net.eval()
+            self.normalizer.train()
+            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)
+            loss_all = loss_sup + loss_unsup
+            self.norm_opt.zero_grad()
+            loss_all.backward()
+            self.norm_opt.step()
+
+            pbar.set_description(f"batch {i + 1}/{len(self.train_loader)}: loss_all_norm: {loss_all.item():.4f}, "
+                                 f"loss_sup: {loss_sup_u_net:.4f}, loss_unsup: {loss_unsup_u_net:.4f}, "
+                                 f"loss_all: {loss_all_u_net:.4f}")
+
+            tags = ["train_loss_all", "train_loss_sup", "train_loss_unsup",
+                    "train_loss_all_norm", "train_loss_sup_norm", "train_loss_unsup_norm"]
+            scalars = [loss_all_u_net, loss_sup_u_net, loss_unsup_u_net,
+                       loss_all.item(), loss_sup.item(), loss_unsup.item()]
+            for tag, scalar in zip(tags, scalars):
+                self.writer.add_scalar(tag, scalar, self.global_steps["train"])
+
+            self.global_steps["train"] += 1
+
+        pbar.close()
 
     @torch.no_grad()
     def _eval(self):
-        pass
+        self.normalizer.eval()
+        self.u_net.eval()
+
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.eval_loader), total=len(self.eval_loader), desc="eval", leave=False)
+
+        loss_sup_avg, loss_unsup_avg = 0, 0
+        num_samples = 0
+        for i, (X, mask) in pbar:
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
+            X = X.to(self.device)
+            mask = mask.to(self.device)
+            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            loss_all = loss_sup + loss_unsup
+            loss_sup_avg += loss_sup * X.shape[0]
+            loss_unsup_avg += loss_unsup * X.shape[0]
+            num_samples += X.shape[0]
+
+            pbar.set_description(f"batch {i + 1}/{len(self.train_loader)}: loss_all: {loss_all.item():.4f}, "
+                                 f"loss_sup: {loss_sup.item():.4f}, loss_unsup: {loss_unsup.item():.4f}")
+
+        loss_sup_avg /= num_samples
+        loss_unsup_avg /= num_samples
+        loss_all_avg = loss_sup_avg + loss_unsup_avg
+
+        self.writer.add_scalar("eval_loss_all", loss_all_avg, self.global_steps["eval"])
+        self.writer.add_scalar("eval_loss_sup", loss_sup_avg, self.global_steps["eval"])
+        self.writer.add_scalar("eval_loss_unsup", loss_unsup_avg, self.global_steps["eval"])
+
+        self.global_steps["eval"] += 1
+        pbar.close()
+
+        return loss_all_avg
 
     def train(self):
-        pass
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
+        pbar = trange(self.epochs, desc="epoch")
+
+        self._create_save_dir()
+        lowest_loss = float("inf")
+
+        for epoch in pbar:
+            self._train()
+            loss_all_avg = self._eval()
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+            if loss_all_avg < lowest_loss:
+                self._save_params(epoch, loss_all_avg)
+                lowest_loss = loss_all_avg
+
+            fig = self._end_epoch_plot()
+            losses_eval_3d = {}
+            self.writer.add_figure("epoch_plot", fig, self.global_steps["epoch"])
+            for key in self.test_dataset_dict:
+                dataset = self.test_dataset_dict[key]
+                loss = evaluate_3d_wrapper(evaluate_3d_no_adapt, dataset, self.normalizer, self.u_net,
+                                           self.device, self.notebook)
+                losses_eval_3d[key] = loss
+                self.writer.add_scalar(f"epoch_3d_{key}", loss, self.global_steps["epoch"])
+
+            eval_3d_loss_desc = ""
+            for key in losses_eval_3d:
+                eval_3d_loss_desc += f", loss_3d_{key}: {losses_eval_3d[key]:.4f}"
+            pbar.set_description(f"epoch {epoch + 1}/{self.epochs}, loss_all: {loss_all_avg:4f}" + eval_3d_loss_desc)
+            self.global_steps["epoch"] += 1
 
     def _compute_normalizer_loss(self, X, mask):
         # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
         # self.u_net.eval(), self.normalizer.train(): set outside the scope
         X = 2 * X - 1
-        mask_pred_direct = self.u_net(X)  # (1, C, H, W)
-        X_norm = self.normalizer(X)  # (1, 1, H, W)
-        mask_pred_norm = self.u_net(X_norm)  # (1, C, H, W)
+        mask_pred_direct = self.u_net(X)  # (B, C, H, W)
+        X_norm = self.normalizer(X)  # (B, 1, H, W)
+        mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
-        loss_sup = loss_fn(X, mask)
+        loss_sup = loss_fn(mask_pred_norm, mask)
         loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
 
         return loss_sup, loss_unsup
