@@ -55,7 +55,7 @@ def make_summary_plot_simplified(X, mask, normalizer, u_net, if_show=False,
     normalizer.eval()
     u_net.eval()
     device = torch.device("cuda") if device is None else device
-    X_orig = X.clone()
+    X_orig = X.clone().to(device)
     X = (2 * X - 1).to(device)
     mask = mask.to(device)
     X_norm = normalizer(X)  # (1, 1, H, W)
@@ -256,10 +256,6 @@ class OnePassTrainer(BasicTrainer):
             if self.scheduler is not None:
                 self.scheduler.step()
 
-            if loss_all_avg < lowest_loss:
-                self._save_params(epoch, loss_all_avg)
-                lowest_loss = loss_all_avg
-
             fig = self._end_epoch_plot()
             losses_eval_3d = {}
             self.writer.add_figure("epoch_plot", fig, self.global_steps["epoch"])
@@ -269,6 +265,12 @@ class OnePassTrainer(BasicTrainer):
                                            self.device, self.notebook)
                 losses_eval_3d[key] = loss
                 self.writer.add_scalar(f"epoch_3d_{key}", loss, self.global_steps["epoch"])
+
+            if loss_all_avg < lowest_loss:
+                self._save_params(epoch, loss_all_avg)
+                lowest_loss = loss_all_avg
+            cur_loss = sum(list(losses_eval_3d.values())) / 3
+            self.writer.add_scalar(f"epoch_3d_avg", cur_loss, self.global_steps["epoch"])
 
             eval_3d_loss_desc = ""
             for key in losses_eval_3d:
@@ -284,7 +286,9 @@ class OnePassTrainer(BasicTrainer):
         mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
-        loss_sup = loss_fn(mask_pred_norm, mask)
+        # TODO: change back
+        # loss_sup = loss_fn(mask_pred_norm, mask)
+        loss_sup = loss_fn(mask_pred_direct, mask)
         loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
 
         return loss_sup, loss_unsup
@@ -415,14 +419,14 @@ class AltTrainer(BasicTrainer):
                 losses_eval_3d[key] = loss
                 self.writer.add_scalar(f"epoch_3d_{key}", loss, self.global_steps["epoch"])
 
-            # if loss_all_avg < lowest_loss:
-            #     self._save_params(epoch, loss_all_avg)
-            #     lowest_loss = loss_all_avg
+            if loss_all_avg < lowest_loss:
+                self._save_params(epoch, loss_all_avg)
+                lowest_loss = loss_all_avg
             cur_loss = sum(list(losses_eval_3d.values())) / 3
-            self.writer.add_scalar(f"epoch_3d_avg", cur_loss, self.global_steps["epochs"])
-            if cur_loss < lowest_loss:
-                self._save_params(epoch, cur_loss)
-                lowest_loss = cur_loss
+            self.writer.add_scalar(f"epoch_3d_avg", cur_loss, self.global_steps["epoch"])
+            # if cur_loss < lowest_loss:
+            #     self._save_params(epoch, cur_loss)
+            #     lowest_loss = cur_loss
 
             eval_3d_loss_desc = ""
             for key in losses_eval_3d:

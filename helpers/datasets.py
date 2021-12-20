@@ -415,6 +415,9 @@ class MnMsHDF5SimplifiedDataset(Dataset):
             transformed = resizer(image=img, mask=mask)
             img, mask = transformed["image"], transformed["mask"]
 
+            # Normalize img before output
+            img = normalize(img, norm_type="div_by_max")
+
             # (1, H, W), (1, H, W)
             return torch.FloatTensor(img).unsqueeze(0), torch.LongTensor(mask).unsqueeze(0)
 

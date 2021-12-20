@@ -930,7 +930,7 @@ class AlternatingTrainer(object):
             #     break
             # ##########
             X = (2 * X - 1).float().to(self.device)
-            X_aug = (2 * X_aug).float().to(self.device)
+            X_aug = (2 * X_aug - 1).float().to(self.device)
             mask = mask.to(self.device)
             # update U-Net
             self.normalizer.eval()
