@@ -405,10 +405,6 @@ class AltTrainer(BasicTrainer):
             if self.scheduler is not None:
                 self.scheduler.step()
 
-            if loss_all_avg < lowest_loss:
-                self._save_params(epoch, loss_all_avg)
-                lowest_loss = loss_all_avg
-
             fig = self._end_epoch_plot()
             losses_eval_3d = {}
             self.writer.add_figure("epoch_plot", fig, self.global_steps["epoch"])
@@ -418,6 +414,15 @@ class AltTrainer(BasicTrainer):
                                            self.device, self.notebook)
                 losses_eval_3d[key] = loss
                 self.writer.add_scalar(f"epoch_3d_{key}", loss, self.global_steps["epoch"])
+
+            # if loss_all_avg < lowest_loss:
+            #     self._save_params(epoch, loss_all_avg)
+            #     lowest_loss = loss_all_avg
+            cur_loss = sum(list(losses_eval_3d.values())) / 3
+            self.writer.add_scalar(f"epoch_3d_avg", cur_loss, self.global_steps["epochs"])
+            if cur_loss < lowest_loss:
+                self._save_params(epoch, cur_loss)
+                lowest_loss = cur_loss
 
             eval_3d_loss_desc = ""
             for key in losses_eval_3d:
