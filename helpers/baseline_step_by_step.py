@@ -8,14 +8,16 @@ from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
 
 
 @torch.no_grad()
-def evaluate_3d_no_adapt(X, mask, normalizer, u_net, device=None):
+def evaluate_3d_no_adapt(X, mask, normalizer, u_net, if_normalizer=True, device=None):
     # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]
     device = torch.device("cuda") if device is None else device
     normalizer.eval()
     u_net.eval()
     X = (2 * X[0] - 1).unsqueeze(1).to(device)  # (D, H, W) -> (D, 1, H, W)
     mask = mask[0].to(device)  # (D, H, W)
-    mask_pred = u_net(normalizer(X))  # (D, C, H, W)
+    if if_normalizer:
+        X = normalizer(X)
+    mask_pred = u_net(X)  # (D, C, H, W)
     loss = dice_loss_3d(mask_pred, mask, num_classes=4)
 
     return loss.item()
@@ -287,8 +289,8 @@ class OnePassTrainer(BasicTrainer):
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
         # TODO: change back
-        # loss_sup = loss_fn(mask_pred_norm, mask)
-        loss_sup = loss_fn(mask_pred_direct, mask)
+        loss_sup = loss_fn(mask_pred_norm, mask)
+        # loss_sup = loss_fn(mask_pred_direct, mask)
         loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
 
         return loss_sup, loss_unsup

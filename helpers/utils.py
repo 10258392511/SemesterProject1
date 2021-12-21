@@ -231,7 +231,7 @@ def get_transforms():
 def get_separated_transforms():
     options = [A.RandomCrop(224, 224, p=0.5), A.Flip(p=0.5), A.ElasticTransform(alpha=50, alpha_affine=0, p=0.5),
                A.Affine(scale=(0.8, 1.0), translate_percent=(0.0, 0.3), rotate=(-25, 25), shear=(-25, 25), p=0.5),
-               A.RandomGamma((50, 150), p=0.5), A.GaussNoise(var_limit=(0, 1), mean=0, p=0.5),
+               A.RandomGamma((50, 150), p=0.5), A.GaussNoise(var_limit=(0, 0.3), mean=0, p=0.5),
                A.GaussianBlur(blur_limit=(3, 7), sigma_limit=0, p=0.5)]
 
     return options

@@ -42,9 +42,10 @@ if __name__ == '__main__':
     args = parser.parse_args()
     hyper_params = dict()
     # set 1
-    hyper_params[1] = [{"lam_ce": 1, "lam_dsc": 0, "lam_smooth": 0, "if_augment": False, "if_alt": False},
-                    {"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": False, "if_alt": False},
-                    {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0, "if_augment": False, "if_alt": False}]
+    hyper_params[1] = [{"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 1, "if_augment": True, "if_alt": True},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.1, "if_augment": True, "if_alt": True},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.01, "if_augment": True, "if_alt": True},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.001, "if_augment": True, "if_alt": True}]
 
     hyper_params_list = hyper_params[args.set_num]
     for hyper_param_dict_iter in hyper_params_list:
