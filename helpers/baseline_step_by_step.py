@@ -101,6 +101,58 @@ def make_summary_plot_simplified(X, mask, normalizer, u_net, if_show=False,
     return fig
 
 
+def make_summary_plot_2_by_2(X, mask, normalizer, u_net, if_show=False,
+                             if_save=False, save_path=None, device=None, **kwargs):
+    if if_save:
+        assert save_path is not None, "please specify a filename to save the image"
+    normalizer.eval()
+    u_net.eval()
+    device = torch.device("cuda") if device is None else device
+    X_orig = X.clone().to(device)
+    B, C_in, H, W = X.shape
+    X = (2 * X - 1).to(device)
+    mask = mask.to(device)
+    X_norm = normalizer(X)  # (1, 16, H, W)
+    # X_norm_plot = (X_norm + 1) / 2  # (1, 1, H, W)
+    # X_norm_diff = X_norm_plot - X_orig  # (1, 1, H, W)
+    mask_direct_pred_full = u_net(X.expand(B, X_norm.shape[1], H, W))  # (1, 16, H, W) -> (1, C, H, W)
+    mask_direct_pred = mask_direct_pred_full.argmax(dim=1)  # (1, C, H, W) -> (1, H, W)
+    mask_norm_pred_full = u_net(X_norm)  # (1, C, H, W)
+    mask_norm_pred = mask_norm_pred_full.argmax(dim=1)  # (1, C, H, W) -> (1, H, W)
+
+    figsize = kwargs.get("figsize", (10.8, 7.2))
+    fraction = kwargs.get("fraction", 0.5)
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    img_grid = [[X_orig[0, 0], mask[0, 0], mask_direct_pred[0]],
+                [mask_direct_pred[0], mask_norm_pred[0]]]
+    title_grid = [["orig", "gt"],
+                  ["direct pred", "normed pred"]]
+
+    for i in range(axes.shape[0]):
+        for j in range(axes.shape[1]):
+            axis = axes[i, j]
+            img_iter = img_grid[i][j].detach().cpu().numpy()
+            title_iter = title_grid[i][j]
+            handle = axis.imshow(img_iter, cmap="gray")
+            plt.colorbar(handle, ax=axis, fraction=fraction)
+            axis.set_title(title_iter)
+
+    loss_direct = dice_loss(mask_direct_pred_full, mask)
+    loss_normed = dice_loss(mask_norm_pred_full, mask)
+
+    suptitle = f"loss_direct: {loss_direct:.4f}, loss_normed: {loss_normed:.4f}"
+    fig.suptitle(suptitle)
+    fig.tight_layout()
+
+    if if_save:
+        plt.savefig(save_path)
+
+    if if_show:
+        plt.show()
+
+    return fig
+
+
 class BasicTrainer(object):
     def __init__(self, train_loader, eval_loader, test_loader, normalizer, u_net, norm_opt, u_net_opt,
                  epochs, num_classes, weights: dict, notebook: bool, writer: SummaryWriter,
@@ -140,8 +192,10 @@ class BasicTrainer(object):
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))
         X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
-        fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
-                                           if_show=self.notebook, device=self.device)
+        # fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+        #                                    if_show=self.notebook, device=self.device)
+        fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+                                       if_show=self.notebook, device=self.device)
         return fig
 
     def _create_save_dir(self):
@@ -176,10 +230,10 @@ class OnePassTrainer(BasicTrainer):
         pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
 
         for i, (X, mask) in pbar:
-            # # debug only #
-            # if i > 2:
-            #     break
-            # ################
+            # debug only #
+            if i > 2:
+                break
+            ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -214,10 +268,10 @@ class OnePassTrainer(BasicTrainer):
         loss_sup_avg, loss_unsup_avg = 0, 0
         num_samples = 0
         for i, (X, mask) in pbar:
-            # # debug only #
-            # if i > 2:
-            #     break
-            # ################
+            # debug only #
+            if i > 2:
+                break
+            ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -281,10 +335,23 @@ class OnePassTrainer(BasicTrainer):
             self.global_steps["epoch"] += 1
 
     def _compute_normalizer_loss(self, X, mask):
+        # # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
+        # X = 2 * X - 1
+        # mask_pred_direct = self.u_net(X)  # (B, C, H, W)
+        # X_norm = self.normalizer(X)  # (B, 1, H, W)
+        # mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
+        # loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+        #                           self.weights["lam_dsc"] * dice_loss(X, mask)
+        # # TODO: change back
+        # loss_sup = loss_fn(mask_pred_norm, mask)
+        # # loss_sup = loss_fn(mask_pred_direct, mask)
+        # loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
+
         # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
+        B, C_in, H, W = X.shape
         X = 2 * X - 1
-        mask_pred_direct = self.u_net(X)  # (B, C, H, W)
         X_norm = self.normalizer(X)  # (B, 1, H, W)
+        mask_pred_direct = self.u_net(X.expand(B, X_norm.shape[1], H, W))  # (B, C, H, W)
         mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
@@ -312,10 +379,10 @@ class AltTrainer(BasicTrainer):
         pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
 
         for i, (X, mask) in pbar:
-            # # debug only #
-            # if i > 2:
-            #     break
-            # ################
+            # debug only #
+            if i > 2:
+                break
+            ################
             X = X.to(self.device)
             mask = mask.to(self.device)
 
@@ -367,10 +434,10 @@ class AltTrainer(BasicTrainer):
         loss_sup_avg, loss_unsup_avg = 0, 0
         num_samples = 0
         for i, (X, mask) in pbar:
-            # # debug only #
-            # if i > 2:
-            #     break
-            # ################
+            # debug only #
+            if i > 2:
+                break
+            ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -437,11 +504,24 @@ class AltTrainer(BasicTrainer):
             self.global_steps["epoch"] += 1
 
     def _compute_normalizer_loss(self, X, mask):
+        # # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
+        # X = 2 * X - 1
+        # mask_pred_direct = self.u_net(X)  # (B, C, H, W)
+        # X_norm = self.normalizer(X)  # (B, 1, H, W)
+        # mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
+        # loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+        #                           self.weights["lam_dsc"] * dice_loss(X, mask)
+        # # TODO: change back
+        # loss_sup = loss_fn(mask_pred_norm, mask)
+        # # loss_sup = loss_fn(mask_pred_direct, mask)
+        # loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
+
         # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
         # self.u_net.eval(), self.normalizer.train(): set outside the scope
+        B, C_in, H, W = X.shape
         X = 2 * X - 1
-        mask_pred_direct = self.u_net(X)  # (B, C, H, W)
         X_norm = self.normalizer(X)  # (B, 1, H, W)
+        mask_pred_direct = self.u_net(X.expand(B, X_norm.shape[1], H, W))  # (B, C, H, W)
         mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)

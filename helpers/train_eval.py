@@ -864,7 +864,7 @@ class MNISTVAETrainer(object):
 ## Normalizer + U-Net Trainer ##
 # This is a copy
 class Normalizer(nn.Module):
-    def __init__(self, num_layers=3, kernel_size=1, in_channels=1, intermediate_channels=16):
+    def __init__(self, num_layers=3, kernel_size=1, in_channels=1, out_channels=1, intermediate_channels=16):
         assert kernel_size % 2 == 1, "kernel_size must be odd"
         super(Normalizer, self).__init__()
         self.num_layers = num_layers
@@ -876,7 +876,7 @@ class Normalizer(nn.Module):
         for _ in range(num_layers - 1):
             layers += [nn.ReLU(),
                        nn.Conv2d(intermediate_channels, intermediate_channels, kernel_size, padding=padding)]
-        layers += [nn.ReLU(), nn.Conv2d(intermediate_channels, 1, kernel_size, padding=padding)]
+        layers += [nn.ReLU(), nn.Conv2d(intermediate_channels, out_channels, kernel_size, padding=padding)]
         self.layers = nn.Sequential(*layers)
         self.conv_layers = [layer for layer in layers if isinstance(layer, nn.Conv2d)]
 
