@@ -54,7 +54,7 @@ if __name__ == '__main__':
                                                          shuffle=shuffle, num_workers=args.num_workers)
 
     u_net = UNet(**config.u_net_params).to(DEVICE)
-    norm = Normalizer().to(DEVICE)
+    norm = Normalizer(**config.normalizer_params).to(DEVICE)
     u_net_opt = torch.optim.Adam(u_net.parameters(), **config.u_net_optimzer_params)
     norm_opt = torch.optim.Adam(norm.parameters(), **config.normalizer_optimizer_params)
 

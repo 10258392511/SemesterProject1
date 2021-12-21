@@ -230,10 +230,10 @@ class OnePassTrainer(BasicTrainer):
         pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
 
         for i, (X, mask) in pbar:
-            # debug only #
-            if i > 2:
-                break
-            ################
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -268,10 +268,10 @@ class OnePassTrainer(BasicTrainer):
         loss_sup_avg, loss_unsup_avg = 0, 0
         num_samples = 0
         for i, (X, mask) in pbar:
-            # debug only #
-            if i > 2:
-                break
-            ################
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -379,10 +379,10 @@ class AltTrainer(BasicTrainer):
         pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
 
         for i, (X, mask) in pbar:
-            # debug only #
-            if i > 2:
-                break
-            ################
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
 
@@ -434,10 +434,10 @@ class AltTrainer(BasicTrainer):
         loss_sup_avg, loss_unsup_avg = 0, 0
         num_samples = 0
         for i, (X, mask) in pbar:
-            # debug only #
-            if i > 2:
-                break
-            ################
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
