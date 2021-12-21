@@ -287,8 +287,8 @@ class OnePassTrainer(BasicTrainer):
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
         # TODO: change back
-        loss_sup = loss_fn(mask_pred_norm, mask)
-        # loss_sup = loss_fn(mask_pred_direct, mask)
+        # loss_sup = loss_fn(mask_pred_norm, mask)
+        loss_sup = loss_fn(mask_pred_direct, mask)
         loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
 
         return loss_sup, loss_unsup
