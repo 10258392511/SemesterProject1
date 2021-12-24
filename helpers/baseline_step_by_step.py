@@ -8,7 +8,7 @@ from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
 
 
 @torch.no_grad()
-def evaluate_3d_no_adapt(X, mask, normalizer, u_net, if_normalizer=True, device=None):
+def evaluate_3d_no_adapt(X, mask, normalizer, u_net, if_normalizer=False, device=None):
     # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]
     device = torch.device("cuda") if device is None else device
     normalizer.eval()
@@ -100,7 +100,7 @@ def make_summary_plot_simplified(X, mask, normalizer, u_net, if_show=False,
 
     return fig
 
-
+@torch.no_grad()
 def make_summary_plot_2_by_2(X, mask, normalizer, u_net, if_show=False,
                              if_save=False, save_path=None, device=None, **kwargs):
     if if_save:
@@ -123,7 +123,7 @@ def make_summary_plot_2_by_2(X, mask, normalizer, u_net, if_show=False,
     figsize = kwargs.get("figsize", (10.8, 7.2))
     fraction = kwargs.get("fraction", 0.5)
     fig, axes = plt.subplots(2, 2, figsize=figsize)
-    img_grid = [[X_orig[0, 0], mask[0, 0], mask_direct_pred[0]],
+    img_grid = [[X_orig[0, 0], mask[0, 0]],
                 [mask_direct_pred[0], mask_norm_pred[0]]]
     title_grid = [["orig", "gt"],
                   ["direct pred", "normed pred"]]
@@ -141,6 +141,58 @@ def make_summary_plot_2_by_2(X, mask, normalizer, u_net, if_show=False,
     loss_normed = dice_loss(mask_norm_pred_full, mask)
 
     suptitle = f"loss_direct: {loss_direct:.4f}, loss_normed: {loss_normed:.4f}"
+    fig.suptitle(suptitle)
+    fig.tight_layout()
+
+    if if_save:
+        plt.savefig(save_path)
+
+    if if_show:
+        plt.show()
+
+    return fig
+
+
+@torch.no_grad()
+def make_summary_plot_1_by_3(X, mask, normalizer, u_net, if_show=False,
+                             if_save=False, save_path=None, device=None, **kwargs):
+    if if_save:
+        assert save_path is not None, "please specify a filename to save the image"
+    normalizer.eval()
+    u_net.eval()
+    device = torch.device("cuda") if device is None else device
+    X_orig = X.clone().to(device)
+    B, C_in, H, W = X.shape
+    X = (2 * X - 1).to(device)
+    mask = mask.to(device)
+    # X_norm = normalizer(X)  # (1, 16, H, W)
+    # X_norm_plot = (X_norm + 1) / 2  # (1, 1, H, W)
+    # X_norm_diff = X_norm_plot - X_orig  # (1, 1, H, W)
+    mask_direct_pred_full = u_net(X)  # (1, 16, H, W) -> (1, C, H, W)
+    mask_direct_pred = mask_direct_pred_full.argmax(dim=1)  # (1, C, H, W) -> (1, H, W)
+    # mask_norm_pred_full = u_net(X_norm)  # (1, C, H, W)
+    # mask_norm_pred = mask_norm_pred_full.argmax(dim=1)  # (1, C, H, W) -> (1, H, W)
+
+    figsize = kwargs.get("figsize", (10.8, 7.2))
+    fraction = kwargs.get("fraction", 0.5)
+    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    axes = axes[None, :]
+    img_grid = [[X_orig[0, 0], mask[0, 0], mask_direct_pred[0]]]
+    title_grid = [["orig", "gt", "direct_pred"]]
+
+    for i in range(axes.shape[0]):
+        for j in range(axes.shape[1]):
+            axis = axes[i, j]
+            img_iter = img_grid[i][j].detach().cpu().numpy()
+            title_iter = title_grid[i][j]
+            handle = axis.imshow(img_iter, cmap="gray")
+            plt.colorbar(handle, ax=axis, fraction=fraction)
+            axis.set_title(title_iter)
+
+    loss_direct = dice_loss(mask_direct_pred_full, mask)
+    # loss_normed = dice_loss(mask_norm_pred_full, mask)
+
+    suptitle = f"loss_direct: {loss_direct:.4f}"
     fig.suptitle(suptitle)
     fig.tight_layout()
 
@@ -194,7 +246,9 @@ class BasicTrainer(object):
         X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
         # fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
         #                                    if_show=self.notebook, device=self.device)
-        fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+        # fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+        #                                if_show=self.notebook, device=self.device)
+        fig = make_summary_plot_1_by_3(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
                                        if_show=self.notebook, device=self.device)
         return fig
 
@@ -228,6 +282,8 @@ class OnePassTrainer(BasicTrainer):
         else:
             from tqdm import tqdm
         pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="training", leave=False)
+        loss_avg = 0
+        num_samples = 0
 
         for i, (X, mask) in pbar:
             # # debug only #
@@ -236,11 +292,14 @@ class OnePassTrainer(BasicTrainer):
             # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
-            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
             self.u_net_opt.zero_grad()
             self.norm_opt.zero_grad()
             loss_all.backward()
+            loss_avg += loss_all.item() * X.shape[0]
+            num_samples += X.shape[0]
             self.u_net_opt.step()
             self.norm_opt.step()
 
@@ -252,6 +311,8 @@ class OnePassTrainer(BasicTrainer):
 
             self.global_steps["train"] += 1
 
+        loss_avg /= num_samples
+        self.writer.add_scalar("train_loss_epoch", loss_avg, self.global_steps["eval"])
         pbar.close()
 
     @torch.no_grad()
@@ -274,13 +335,14 @@ class OnePassTrainer(BasicTrainer):
             # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
-            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
             loss_sup_avg += loss_sup * X.shape[0]
             loss_unsup_avg += loss_unsup * X.shape[0]
             num_samples += X.shape[0]
 
-            pbar.set_description(f"batch {i + 1}/{len(self.train_loader)}: loss_all: {loss_all.item():.4f}, "
+            pbar.set_description(f"batch {i + 1}/{len(self.eval_loader)}: loss_all: {loss_all.item():.4f}, "
                                  f"loss_sup: {loss_sup.item():.4f}, loss_unsup: {loss_unsup.item():.4f}")
 
         loss_sup_avg /= num_samples
@@ -363,7 +425,14 @@ class OnePassTrainer(BasicTrainer):
         return loss_sup, loss_unsup
 
     def _compute_u_net_loss(self, X, mask):
-        return self._compute_normalizer_loss(X, mask)
+        # return self._compute_normalizer_loss(X, mask)
+        X = 2 * X - 1
+        mask_pred = self.u_net(X)  # (B, 1, H, W) -> (B, K, H, W)
+        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+                                  self.weights["lam_dsc"] * dice_loss(X, mask)
+        loss_sup = loss_fn(mask_pred, mask)
+
+        return loss_sup, loss_sup * self.weights["lam_smooth"]
 
 
 class AltTrainer(BasicTrainer):

@@ -57,8 +57,9 @@ class UNet(nn.Module):
         self.up_blocks = nn.ModuleList()
         in_channels = self.bottom_channels
         out_channels = in_channels // 2
+        att = kwargs.get("attention", True)
         for _ in range(num_down_blocks - 1):
-            self.up_blocks.append(UpBlock(in_channels, out_channels, out_channels, feature_dim))
+            self.up_blocks.append(UpBlock(in_channels, out_channels, out_channels, feature_dim, att))
             in_channels = out_channels
             out_channels //= 2
         self.out_conv = get_conv(feature_dim, in_channels=in_channels, out_channels=target_channels,
