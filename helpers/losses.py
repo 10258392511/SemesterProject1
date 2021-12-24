@@ -50,7 +50,7 @@ def symmetric_loss(X1, X2, loss_fn):
     return (loss1 + loss2) / 2
 
 
-def dice_loss_3d(X, mask, num_classes=4, if_soft_max=True, with_bg=False):
+def dice_loss_3d(X, mask, num_classes=4, if_soft_max=True, with_bg=False, eps=1e-10):
     """
     X, mask: (D, C, H, W), (D, H, W)
     """
@@ -65,6 +65,7 @@ def dice_loss_3d(X, mask, num_classes=4, if_soft_max=True, with_bg=False):
         start_index = 0
     else:
         start_index = 1
-    loss = 1 - (2 * X_intersect_reduced[start_index:] / (X_reduced[start_index:] + mask_reduced[start_index:])).mean()
+    loss = 1 - (2 * X_intersect_reduced[start_index:] / (X_reduced[start_index:] + mask_reduced[start_index:]
+                                                         + eps)).mean()
 
     return loss

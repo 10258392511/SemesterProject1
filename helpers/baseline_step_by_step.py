@@ -292,8 +292,8 @@ class OnePassTrainer(BasicTrainer):
             # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
-            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
-            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            # loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
             self.u_net_opt.zero_grad()
             self.norm_opt.zero_grad()
@@ -335,11 +335,11 @@ class OnePassTrainer(BasicTrainer):
             # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
-            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
-            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            # loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
-            loss_sup_avg += loss_sup * X.shape[0]
-            loss_unsup_avg += loss_unsup * X.shape[0]
+            loss_sup_avg += loss_sup.item() * X.shape[0]
+            loss_unsup_avg += loss_unsup.item() * X.shape[0]
             num_samples += X.shape[0]
 
             pbar.set_description(f"batch {i + 1}/{len(self.eval_loader)}: loss_all: {loss_all.item():.4f}, "
@@ -397,10 +397,23 @@ class OnePassTrainer(BasicTrainer):
             self.global_steps["epoch"] += 1
 
     def _compute_normalizer_loss(self, X, mask):
+        # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
+        X = 2 * X - 1
+        mask_pred_direct = self.u_net(X)  # (B, C, H, W)
+        X_norm = self.normalizer(X)  # (B, 1, H, W)
+        mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
+        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+                                  self.weights["lam_dsc"] * dice_loss(X, mask)
+        # TODO: change back
+        # loss_sup = loss_fn(mask_pred_norm, mask)
+        loss_sup = loss_fn(mask_pred_direct, mask)
+        loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
+
         # # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
+        # B, C_in, H, W = X.shape
         # X = 2 * X - 1
-        # mask_pred_direct = self.u_net(X)  # (B, C, H, W)
         # X_norm = self.normalizer(X)  # (B, 1, H, W)
+        # mask_pred_direct = self.u_net(X.expand(B, X_norm.shape[1], H, W))  # (B, C, H, W)
         # mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
         # loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
         #                           self.weights["lam_dsc"] * dice_loss(X, mask)
@@ -408,19 +421,6 @@ class OnePassTrainer(BasicTrainer):
         # loss_sup = loss_fn(mask_pred_norm, mask)
         # # loss_sup = loss_fn(mask_pred_direct, mask)
         # loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
-
-        # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
-        B, C_in, H, W = X.shape
-        X = 2 * X - 1
-        X_norm = self.normalizer(X)  # (B, 1, H, W)
-        mask_pred_direct = self.u_net(X.expand(B, X_norm.shape[1], H, W))  # (B, C, H, W)
-        mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
-        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
-                                  self.weights["lam_dsc"] * dice_loss(X, mask)
-        # TODO: change back
-        loss_sup = loss_fn(mask_pred_norm, mask)
-        # loss_sup = loss_fn(mask_pred_direct, mask)
-        loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
 
         return loss_sup, loss_unsup
 
