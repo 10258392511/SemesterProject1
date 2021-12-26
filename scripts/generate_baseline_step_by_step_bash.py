@@ -44,7 +44,13 @@ if __name__ == '__main__':
     # set 1
     hyper_params[1] = [{"lam_ce": 1, "lam_dsc": 0, "lam_smooth": 0, "if_augment": False, "if_alt": False},
                        {"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": False, "if_alt": False},
-                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0, "if_augment": False, "if_alt": False}]
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0, "if_augment": False, "if_alt": False},
+                       {"lam_ce": 1, "lam_dsc": 0, "lam_smooth": 0, "if_augment": True, "if_alt": False},
+                       {"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": False},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0, "if_augment": True, "if_alt": False},
+                       {"lam_ce": 1, "lam_dsc": 0, "lam_smooth": 0, "if_augment": True, "if_alt": True},
+                       {"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": True},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0, "if_augment": True, "if_alt": True}]
    
     # set 2
     hyper_params[2] = [{"lam_ce": 1, "lam_dsc": 0, "lam_smooth": 0, "if_augment": True, "if_alt": True},
