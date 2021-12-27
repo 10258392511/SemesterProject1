@@ -246,10 +246,10 @@ class BasicTrainer(object):
         X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
         # fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
         #                                    if_show=self.notebook, device=self.device)
-        fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
-                                       if_show=self.notebook, device=self.device)
-        # fig = make_summary_plot_1_by_3(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+        # fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
         #                                if_show=self.notebook, device=self.device)
+        fig = make_summary_plot_1_by_3(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+                                       if_show=self.notebook, device=self.device)
         return fig
 
     def _create_save_dir(self):
@@ -286,10 +286,10 @@ class OnePassTrainer(BasicTrainer):
         num_samples = 0
 
         for i, (X, mask) in pbar:
-            # # debug only #
-            # if i > 2:
-            #     break
-            # ################
+            # debug only #
+            if i > 2:
+                break
+            ################
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
@@ -329,14 +329,14 @@ class OnePassTrainer(BasicTrainer):
         loss_sup_avg, loss_unsup_avg = 0, 0
         num_samples = 0
         for i, (X, mask) in pbar:
-            # # debug only #
-            # if i > 2:
-            #     break
-            ################
+            # debug only #
+            if i > 2:
+                break
+            ###############
             X = X.to(self.device)
             mask = mask.to(self.device)
-            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
-            # loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
             loss_sup_avg += loss_sup.item() * X.shape[0]
             loss_unsup_avg += loss_unsup.item() * X.shape[0]
@@ -425,14 +425,14 @@ class OnePassTrainer(BasicTrainer):
         return loss_sup, loss_unsup
 
     def _compute_u_net_loss(self, X, mask):
-        return self._compute_normalizer_loss(X, mask)
-        # X = 2 * X - 1
-        # mask_pred = self.u_net(X)  # (B, 1, H, W) -> (B, K, H, W)
-        # loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
-        #                           self.weights["lam_dsc"] * dice_loss(X, mask)
-        # loss_sup = loss_fn(mask_pred, mask)
-        #
-        # return loss_sup, loss_sup * self.weights["lam_smooth"]
+        # return self._compute_normalizer_loss(X, mask)
+        X = 2 * X - 1
+        mask_pred = self.u_net(X)  # (B, 1, H, W) -> (B, K, H, W)
+        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+                                  self.weights["lam_dsc"] * dice_loss(X, mask)
+        loss_sup = loss_fn(mask_pred, mask)
+
+        return loss_sup, loss_sup * self.weights["lam_smooth"]
 
 
 class AltTrainer(BasicTrainer):

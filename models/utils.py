@@ -20,9 +20,9 @@ def get_pool(feature_dim=2, **kwargs):
 
 def get_bn(feature_dim=2, **kwargs):
     assert feature_dim in [2, 3], "only supports 2D and 3D data"
-    track_running_stats = kwargs.get("track_running_stats", False)
-    kwargs["track_running_stats"] = track_running_stats
-    # print(kwargs)
+    # track_running_stats = kwargs.get("track_running_stats", False)
+    # kwargs["track_running_stats"] = track_running_stats
+    # # print(kwargs)
     if feature_dim == 2:
         return nn.BatchNorm2d(**kwargs)
     else:
