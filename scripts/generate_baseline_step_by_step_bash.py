@@ -63,7 +63,7 @@ if __name__ == '__main__':
                        {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.001, "if_augment": True, "if_alt": True}]
 
     # set 4: extra
-    hyper_params[4] = [{"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": False, "if_alt": False}]
+    hyper_params[4] = [{"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": False}]
 
     hyper_params_list = hyper_params[args.set_num]
     for hyper_param_dict_iter in hyper_params_list:

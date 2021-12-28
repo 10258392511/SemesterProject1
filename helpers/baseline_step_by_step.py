@@ -8,7 +8,7 @@ from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
 
 
 @torch.no_grad()
-def evaluate_3d_no_adapt(X, mask, normalizer, u_net, if_normalizer=True, device=None):
+def evaluate_3d_no_adapt(X, mask, normalizer, u_net, if_normalizer=False, device=None):
     # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]
     device = torch.device("cuda") if device is None else device
     normalizer.eval()
@@ -286,14 +286,14 @@ class OnePassTrainer(BasicTrainer):
         num_samples = 0
 
         for i, (X, mask) in pbar:
-            # debug only #
-            if i > 2:
-                break
-            ################
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
-            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
-            # loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
             self.u_net_opt.zero_grad()
             self.norm_opt.zero_grad()
@@ -329,10 +329,10 @@ class OnePassTrainer(BasicTrainer):
         loss_sup_avg, loss_unsup_avg = 0, 0
         num_samples = 0
         for i, (X, mask) in pbar:
-            # debug only #
-            if i > 2:
-                break
-            ###############
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ###############
             X = X.to(self.device)
             mask = mask.to(self.device)
             # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
