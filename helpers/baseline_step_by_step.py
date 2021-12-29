@@ -260,8 +260,8 @@ class BasicTrainer(object):
     def _save_params(self, epoch, eval_loss):
         dir_path = os.path.join(self.param_save_dir, self.time_stamp)
         for filename in os.listdir(dir_path):
-            if os.path.isfile(filename):
-                filename_abs = os.path.join(dir_path, filename)
+            filename_abs = os.path.join(dir_path, filename)
+            if os.path.isfile(filename_abs):
                 os.remove(filename_abs)
         filename_common = f"epoch_{epoch}_eval_loss_{eval_loss:.4f}".replace(".", "_") + ".pt"
         torch.save(self.normalizer.state_dict(), f"{dir_path}/norm_{filename_common}")

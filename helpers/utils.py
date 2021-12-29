@@ -228,8 +228,8 @@ def get_transforms():
     return options
 
 
-def get_separated_transforms():
-    p = 0.1
+def get_separated_transforms(p=0.1):
+    # p = 0.1
     options = [A.RandomCrop(224, 224, p=p), A.Flip(p=p), A.ElasticTransform(alpha=50, alpha_affine=0, p=p),
                A.Affine(scale=(0.8, 1.0), translate_percent=(0.0, 0.3), rotate=(-25, 25), shear=(-25, 25), p=p),
                A.RandomGamma((50, 150), p=p), A.GaussNoise(var_limit=(0, 0.3), mean=0, p=p),
