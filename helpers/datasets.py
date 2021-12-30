@@ -14,6 +14,7 @@ from torchvision.datasets import MNIST
 from torchvision.transforms import ToTensor, Resize
 from albumentations import BasicTransform, Compose
 from .utils import convert_mask, normalize
+from .utils_data_aug import do_data_augmentation
 
 
 class CarDataset(Dataset):
@@ -375,7 +376,8 @@ class MnMsHDF5SimplifiedDataset(Dataset):
     --test
     ...
     """
-    def __init__(self, data_path, source_name, mode, transforms: list, target_size=(256, 256), if_augment=False):
+    def __init__(self, data_path, source_name, mode, transforms: list, target_size=(256, 256), if_augment=False,
+                 data_aug_dict=None):
         super(MnMsHDF5SimplifiedDataset, self).__init__()
         assert ".h5" in data_path, "data_path must be a hdf5 file"
         assert source_name in ["csf", "hvhd", "uhe"], "invalid source name"
@@ -387,6 +389,7 @@ class MnMsHDF5SimplifiedDataset(Dataset):
         self.transforms = transforms
         self.target_size = target_size
         self.if_augment = if_augment
+        self.data_aug_dict = data_aug_dict if data_aug_dict is not None else dict()
 
     def __len__(self):
         with h5py.File(self.data_path, "r") as hdf:
@@ -407,10 +410,18 @@ class MnMsHDF5SimplifiedDataset(Dataset):
         img = normalize(img, norm_type="div_by_max")
 
         if self.mode == "train" and self.if_augment:
-            transform = A.Compose(self.transforms)
-            transformed = transform(image=img, mask=mask)
-            img, mask = transformed["image"], transformed["mask"]
+            # transform = A.Compose(self.transforms)
+            # transformed = transform(image=img, mask=mask)
+            # img, mask = transformed["image"], transformed["mask"]
+            #
+            # resizer = A.Resize(*self.target_size, always_apply=True)
+            # transformed = resizer(image=img, mask=mask)
+            # img, mask = transformed["image"], transformed["mask"]
 
+            img, mask = img[None, ...], mask[None, ...]  # (1, H, W) each
+            img, mask = do_data_augmentation(img, mask, **self.data_aug_dict)
+            img, mask = img[0], mask[0]  # (H, W) each
+            # print(f"{img.shape}, {mask.shape}")
             resizer = A.Resize(*self.target_size, always_apply=True)
             transformed = resizer(image=img, mask=mask)
             img, mask = transformed["image"], transformed["mask"]

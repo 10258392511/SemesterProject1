@@ -10,6 +10,7 @@ from models.modules import Normalizer
 from helpers.datasets import MnMsHDF5SimplifiedDataset, MnMs3DDataset
 from helpers.utils import get_separated_transforms
 from helpers.baseline_step_by_step import OnePassTrainer, AltTrainer
+from scripts.config import data_aug_defaults
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -39,7 +40,8 @@ if __name__ == '__main__':
     train_dataset_dict = {}
     for mode in modes:
         train_dataset_dict[mode] = MnMsHDF5SimplifiedDataset(args.input_dir, args.train_source_name, mode,
-                                                             transforms=transforms, if_augment=args.if_augment)
+                                                             transforms=transforms, if_augment=args.if_augment,
+                                                             data_aug_dict=data_aug_defaults)
     test_dataset_dict = {}
     for source_name in source_names:
         test_dataset_dict[source_name] = MnMs3DDataset(args.input_dir_3d, source_name, "test")
