@@ -20,7 +20,7 @@ then
     mkdir params
 fi
 
-python ./run_baseline_step_by_step.py --train_source_name "csf" --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 6 --num_workers 3 --epochs 30 --lam_ce {hyper_param_dict["lam_ce"]} --lam_dsc {hyper_param_dict["lam_dsc"]} --lam_smooth {hyper_param_dict["lam_smooth"]}{" --if_augment" if hyper_param_dict["if_augment"] else ""}{" --if_alt" if hyper_param_dict["if_alt"] else ""}"""
+python ./run_baseline_step_by_step.py --train_source_name "csf" --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 6 --num_workers 3 --epochs 30 --lam_ce {hyper_param_dict["lam_ce"]} --lam_dsc {hyper_param_dict["lam_dsc"]} --lam_smooth {hyper_param_dict["lam_smooth"]} --aug_prob {hyper_param_dict["aug_prob"]} {" --if_augment" if hyper_param_dict["if_augment"] else ""}{" --if_alt" if hyper_param_dict["if_alt"] else ""}{" --if_not_att" if hyper_param_dict["if_not_att"] else ""}"""
 
     return bash_script
 
@@ -63,7 +63,11 @@ if __name__ == '__main__':
                        {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.001, "if_augment": True, "if_alt": True}]
 
     # set 4: extra
-    hyper_params[4] = [{"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": False}]
+    hyper_params[4] = []
+    for if_not_att in [True, False]:
+        for aug_prob in [0.1, 0.2, 0.3, 0.4, 0.5]:
+            hyper_params[4].append({"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": False,
+                                    "if_not_att": if_not_att, "aug_prob": aug_prob})
 
     hyper_params_list = hyper_params[args.set_num]
     for hyper_param_dict_iter in hyper_params_list:

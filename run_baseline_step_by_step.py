@@ -10,7 +10,6 @@ from models.modules import Normalizer
 from helpers.datasets import MnMsHDF5SimplifiedDataset, MnMs3DDataset
 from helpers.utils import get_separated_transforms
 from helpers.baseline_step_by_step import OnePassTrainer, AltTrainer
-from scripts.config import data_aug_defaults
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -26,7 +25,13 @@ if __name__ == '__main__':
     parser.add_argument("--lam_dsc", type=float, required=True)
     parser.add_argument("--lam_smooth", type=float, required=True)
     parser.add_argument("--if_alt", action="store_true")
+    parser.add_argument("--aug_prob", type=float, default=0.5)
+    parser.add_argument("--if_not_att", action="store_false")
     args = parser.parse_args()
+
+    config.data_aug_defaults["data_aug_ratio"] = args.aug_prob
+    config.u_net_params["attention"] = args.if_not_att
+    print(f"{args}, {config.data_aug_defaults}, {config.u_net_params}")
 
     DEVICE = torch.device(args.device)
 
