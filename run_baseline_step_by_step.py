@@ -67,7 +67,7 @@ if __name__ == '__main__':
 
     weights = dict(lam_ce=args.lam_ce, lam_dsc=args.lam_dsc, lam_smooth=args.lam_smooth)
     time_stamp = f"{time.time()}_ce_{weights['lam_ce']}_dsc_{weights['lam_dsc']}_s_{weights['lam_smooth']}_alt_" \
-                 f"{args.if_alt}_aug_{args.if_augment}_att_{args.if_not_att}_aug_prob_{args.aug_prob}".replace(".", "_")
+                 f"{args.if_alt}_aug_{args.if_augment}_att_{args.if_att}_aug_prob_{args.aug_prob}".replace(".", "_")
     writer = SummaryWriter(f"run/norm_u_net/{time_stamp}")
     trainer_args = dict(test_dataset_dict=test_dataset_dict, normalizer=norm, u_net=u_net,
                         norm_opt=norm_opt, u_net_opt=u_net_opt, epochs=args.epochs, num_classes=4,
