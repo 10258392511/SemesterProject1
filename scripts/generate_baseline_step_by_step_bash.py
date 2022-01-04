@@ -20,7 +20,7 @@ then
     mkdir params
 fi
 
-python ./run_baseline_step_by_step.py --train_source_name "csf" --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 6 --num_workers 3 --epochs 100 --lam_ce {hyper_param_dict["lam_ce"]} --lam_dsc {hyper_param_dict["lam_dsc"]} --lam_smooth {hyper_param_dict["lam_smooth"]} --aug_prob {hyper_param_dict["aug_prob"]} {" --if_augment" if hyper_param_dict["if_augment"] else ""}{" --if_alt" if hyper_param_dict["if_alt"] else ""}{" --if_not_att" if hyper_param_dict["if_not_att"] else ""}"""
+python ./run_baseline_step_by_step.py --train_source_name "csf" --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 6 --num_workers 3 --epochs 100 --lam_ce {hyper_param_dict["lam_ce"]} --lam_dsc {hyper_param_dict["lam_dsc"]} --lam_smooth {hyper_param_dict["lam_smooth"]} --aug_prob {hyper_param_dict["aug_prob"]} {" --if_augment" if hyper_param_dict["if_augment"] else ""}{" --if_alt" if hyper_param_dict["if_alt"] else ""}{" --if_not_att" if hyper_param_dict["if_att"] else ""}"""
 
     return bash_script
 
@@ -53,9 +53,8 @@ if __name__ == '__main__':
                        {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0, "if_augment": True, "if_alt": True}]
    
     # set 2
-    hyper_params[2] = [{"lam_ce": 1, "lam_dsc": 0, "lam_smooth": 0, "if_augment": True, "if_alt": True},
-                       {"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": True},
-                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0, "if_augment": True, "if_alt": True}]
+    hyper_params[2] = [{"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": False, "if_alt": False},
+                       {"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": False}]
     # set 3
     hyper_params[3] = [{"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 1, "if_augment": True, "if_alt": True},
                        {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.1, "if_augment": True, "if_alt": True},

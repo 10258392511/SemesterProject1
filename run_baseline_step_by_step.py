@@ -25,12 +25,12 @@ if __name__ == '__main__':
     parser.add_argument("--lam_dsc", type=float, required=True)
     parser.add_argument("--lam_smooth", type=float, required=True)
     parser.add_argument("--if_alt", action="store_true")
-    parser.add_argument("--aug_prob", type=float, default=0.5)
-    parser.add_argument("--if_not_att", action="store_false")
+    parser.add_argument("--aug_prob", type=float, default=0.3)
+    parser.add_argument("--if_att", action="store_false")
     args = parser.parse_args()
 
     config.data_aug_defaults["data_aug_ratio"] = args.aug_prob
-    config.u_net_params["attention"] = args.if_not_att
+    config.u_net_params["attention"] = args.if_att
     # print(f"{args}, {config.data_aug_defaults}, {config.u_net_params}")
 
     DEVICE = torch.device(args.device)
@@ -67,8 +67,7 @@ if __name__ == '__main__':
 
     weights = dict(lam_ce=args.lam_ce, lam_dsc=args.lam_dsc, lam_smooth=args.lam_smooth)
     time_stamp = f"{time.time()}_ce_{weights['lam_ce']}_dsc_{weights['lam_dsc']}_s_{weights['lam_smooth']}_alt_" \
-                 f"{args.if_alt}_aug_{args.if_augment}_not_att_{args.if_not_att}_aug_prob_{args.aug_prob}".replace(".",
-                                                                                                                  "_")
+                 f"{args.if_alt}_aug_{args.if_augment}_att_{args.if_not_att}_aug_prob_{args.aug_prob}".replace(".", "_")
     writer = SummaryWriter(f"run/norm_u_net/{time_stamp}")
     trainer_args = dict(test_dataset_dict=test_dataset_dict, normalizer=norm, u_net=u_net,
                         norm_opt=norm_opt, u_net_opt=u_net_opt, epochs=args.epochs, num_classes=4,

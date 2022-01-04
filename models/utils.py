@@ -23,10 +23,21 @@ def get_bn(feature_dim=2, **kwargs):
     # track_running_stats = kwargs.get("track_running_stats", False)
     # kwargs["track_running_stats"] = track_running_stats
     # # print(kwargs)
+
+    # # BN
+    # if feature_dim == 2:
+    #     return nn.BatchNorm2d(**kwargs)
+    # else:
+    #     return nn.BatchNorm3d(**kwargs)
+
+    # # LN (discarding "kwargs")
+    # if feature_dim == 2:
+
+    # IN
     if feature_dim == 2:
-        return nn.BatchNorm2d(**kwargs)
+        return nn.InstanceNorm2d(affine=True, **kwargs)
     else:
-        return nn.BatchNorm3d(**kwargs)
+        return nn.InstanceNorm3d(affine=True, **kwargs)
 
 
 def get_conv_transpose(feature_dim=2, **kwargs):
