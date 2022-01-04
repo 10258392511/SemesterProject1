@@ -26,7 +26,7 @@ if __name__ == '__main__':
     parser.add_argument("--lam_smooth", type=float, required=True)
     parser.add_argument("--if_alt", action="store_true")
     parser.add_argument("--aug_prob", type=float, default=0.3)
-    parser.add_argument("--if_att", action="store_false")
+    parser.add_argument("--if_att", action="store_true")
     args = parser.parse_args()
 
     config.data_aug_defaults["data_aug_ratio"] = args.aug_prob
