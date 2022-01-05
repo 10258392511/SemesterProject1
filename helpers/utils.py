@@ -294,3 +294,16 @@ def normalize(img, norm_type="div_by_max", eps=1e-8):
         img = np.clip(img, 0, 1)
 
     return img
+
+
+def random_gamma_transform(X, gamma_min=0.5, gamma_max=2):
+    # X: (B, 1, H, W), [0, 1], after sent to gpu
+    X_cpu = X.detach().cpu()
+    X_out = torch.empty_like(X_cpu)
+    for i in range(X.shape[0]):
+        img = X_cpu[i, 0, ...].numpy()  # (H, W)
+        gamma = np.round(np.random.uniform(gamma_min, gamma_max), 2)
+        img_out = normalize(img ** gamma)
+        X_out[i, 0] = torch.FloatTensor(img_out)
+
+    return X_out.to(X.device)

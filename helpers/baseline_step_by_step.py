@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 from torch.utils.tensorboard import SummaryWriter
 from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
+from .utils import random_gamma_transform
 
 
 @torch.no_grad()
@@ -292,8 +293,8 @@ class OnePassTrainer(BasicTrainer):
             # ################
             X = X.to(self.device)
             mask = mask.to(self.device)
-            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
-            # loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
             self.u_net_opt.zero_grad()
             self.norm_opt.zero_grad()
@@ -335,8 +336,8 @@ class OnePassTrainer(BasicTrainer):
             # ###############
             X = X.to(self.device)
             mask = mask.to(self.device)
-            loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
-            # loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            # loss_sup, loss_unsup = self._compute_normalizer_loss(X, mask)  # only one pass is required
+            loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             loss_all = loss_sup + loss_unsup
             loss_sup_avg += loss_sup.item() * X.shape[0]
             loss_unsup_avg += loss_unsup.item() * X.shape[0]
@@ -426,14 +427,29 @@ class OnePassTrainer(BasicTrainer):
         return loss_sup, loss_unsup
 
     def _compute_u_net_loss(self, X, mask):
-        # return self._compute_normalizer_loss(X, mask)
+        # # return self._compute_normalizer_loss(X, mask)
+
+        # standard U-Net training
+        # X = 2 * X - 1
+        # mask_pred = self.u_net(X)  # (B, 1, H, W) -> (B, K, H, W)
+        # loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+        #                           self.weights["lam_dsc"] * dice_loss(X, mask)
+        # loss_sup = loss_fn(mask_pred, mask)
+        #
+        # return loss_sup, loss_sup * self.weights["lam_smooth"]
+
+        # U-Net with data consistency
+        X_aug = random_gamma_transform(X)
+        X_aug = 2 * X_aug - 1
         X = 2 * X - 1
-        mask_pred = self.u_net(X)  # (B, 1, H, W) -> (B, K, H, W)
+        mask_pred_direct = self.u_net(X)  # (B, 1, H, W) -> (B, K, H, W)
+        mask_pred_aug = self.u_net(X_aug)
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
-        loss_sup = loss_fn(mask_pred, mask)
+        loss_sup = loss_fn(mask_pred_direct, mask)
+        loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_aug, loss_fn)
 
-        return loss_sup, loss_sup * self.weights["lam_smooth"]
+        return loss_sup, loss_unsup
 
 
 class AltTrainer(BasicTrainer):

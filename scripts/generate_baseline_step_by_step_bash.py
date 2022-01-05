@@ -55,14 +55,14 @@ if __name__ == '__main__':
                        {"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": True, "if_alt": False,
                         "if_att": True, "aug_prob": 0.5}]
     # set 3
-    hyper_params[3] = [{"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 1, "if_augment": True, "if_alt": True,
-                        "if_att": True, "aug_prob": 0.3},
-                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.1, "if_augment": True, "if_alt": True,
-                        "if_att": True, "aug_prob": 0.3},
-                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.01, "if_augment": True, "if_alt": True,
-                        "if_att": True, "aug_prob": 0.3},
-                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.001, "if_augment": True, "if_alt": True,
-                        "if_att": True, "aug_prob": 0.3}]
+    hyper_params[3] = [{"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 1, "if_augment": True, "if_alt": False,
+                        "if_att": True, "aug_prob": 0.5},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.1, "if_augment": True, "if_alt": False,
+                        "if_att": True, "aug_prob": 0.5},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.01, "if_augment": True, "if_alt": False,
+                        "if_att": True, "aug_prob": 0.5},
+                       {"lam_ce": 0.5, "lam_dsc": 0.5, "lam_smooth": 0.001, "if_augment": True, "if_alt": False,
+                        "if_att": True, "aug_prob": 0.5}]
 
     # set 4: extra
     hyper_params[4] = [{"lam_ce": 0, "lam_dsc": 1, "lam_smooth": 0, "if_augment": False, "if_alt": False,
