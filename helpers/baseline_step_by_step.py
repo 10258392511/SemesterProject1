@@ -245,10 +245,10 @@ class BasicTrainer(object):
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))
         X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
-        fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
-                                           if_show=self.notebook, device=self.device)
-        # fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
-        #                                if_show=self.notebook, device=self.device)
+        # fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+        #                                    if_show=self.notebook, device=self.device)
+        fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+                                       if_show=self.notebook, device=self.device)
         # fig = make_summary_plot_1_by_3(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
         #                                if_show=self.notebook, device=self.device)
         return fig
@@ -399,25 +399,11 @@ class OnePassTrainer(BasicTrainer):
 
     def _compute_normalizer_loss(self, X, mask):
         # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
-        X_aug = random_gamma_transform(X)
-        X = 2 * X - 1
-        X_aug = 2 * X_aug - 1
-        mask_pred_direct = self.u_net(X_aug)  # (B, C, H, W)
-        X_norm = self.normalizer(X)  # (B, 1, H, W)
-        mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
-        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
-                                  self.weights["lam_dsc"] * dice_loss(X, mask)
-        # TODO: change back
-        loss_sup = loss_fn(mask_pred_norm, mask)
-        # loss_sup = loss_fn(mask_pred_direct, mask)
-        loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
-
-        # # full normalizer
-        # # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
-        # B, C_in, H, W = X.shape
+        # X_aug = random_gamma_transform(X)
         # X = 2 * X - 1
+        # X_aug = 2 * X_aug - 1
+        # mask_pred_direct = self.u_net(X_aug)  # (B, C, H, W)
         # X_norm = self.normalizer(X)  # (B, 1, H, W)
-        # mask_pred_direct = self.u_net(X.expand(B, X_norm.shape[1], H, W))  # (B, C, H, W)
         # mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
         # loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
         #                           self.weights["lam_dsc"] * dice_loss(X, mask)
@@ -425,6 +411,22 @@ class OnePassTrainer(BasicTrainer):
         # loss_sup = loss_fn(mask_pred_norm, mask)
         # # loss_sup = loss_fn(mask_pred_direct, mask)
         # loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
+
+        # full normalizer
+        # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
+        B, C_in, H, W = X.shape
+        X_aug = random_gamma_transform(X)
+        X = 2 * X - 1
+        X_aug = 2 * X_aug - 1
+        X_norm = self.normalizer(X)  # (B, 1, H, W)
+        mask_pred_direct = self.u_net(X_aug.expand(B, X_norm.shape[1], H, W))  # (B, C, H, W)
+        mask_pred_norm = self.u_net(X_norm)  # (B, C, H, W)
+        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+                                  self.weights["lam_dsc"] * dice_loss(X, mask)
+        # TODO: change back
+        loss_sup = loss_fn(mask_pred_norm, mask)
+        # loss_sup = loss_fn(mask_pred_direct, mask)
+        loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_norm, loss_fn)
 
         return loss_sup, loss_unsup
 
