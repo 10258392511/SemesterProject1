@@ -3,6 +3,7 @@ import os
 import numpy as np
 import matplotlib.pyplot as plt
 
+from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
 from .utils import random_gamma_transform
@@ -24,8 +25,158 @@ def evaluate_3d_no_adapt(X, mask, normalizer, u_net, if_normalizer=True, device=
     return loss.item()
 
 
-@torch.no_grad()
-def evaluate_3d_wrapper(evaluate_fn, dataset, normalizer, u_net, device=None, if_notebook=False):
+def compute_norm_loss_and_update(data_loader, normalizer, u_net, norm_opt,  loss_fn, device):
+    # X: cpu; X: [0, 1]
+    u_net.eval()
+    normalizer.train()
+    loss_acc = 0
+    num_samples = 0
+    for X in data_loader:
+        X = (2 * X - 1).float().to(device)
+        X_pred = u_net(X)
+        X_norm_pred = u_net(normalizer(X))
+        loss = symmetric_loss(X_pred, X_norm_pred, loss_fn) * X.shape[0]
+        norm_opt.zero_grad()
+        loss.backward()
+        norm_opt.step()
+        loss_acc += loss.item() * X.shape[0]
+        num_samples += X.shape[0]
+
+    return loss_acc / num_samples
+
+
+def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
+                         loss_fn=None, device=None, diff_rel=1e-4, max_iters=10):
+    # X, mask: (B, 1, H, W) each, cpu, [0, 1]; normalizer: bottleneck; "mask" can be None
+    if loss_fn is None:
+        loss_fn = lambda X, mask: 0.5 * dice_loss(X, mask) + 0.5 * cross_entropy_loss(X, mask)
+
+    device = torch.device("cuda") if device is None else device
+    # X = (2 * X - 1).to(device)
+
+    if mask is not None:
+        mask = mask.to(device)
+
+    u_net.eval()
+    normalizer.train()
+    local_loader = DataLoader(X, batch_size=batch_size)
+
+    X = (2 * X - 1).float().to(device)
+
+    if mask is not None:
+        fig_orig = make_summary_plot_simplified(X, mask, normalizer, u_net, device=device)
+
+    losses = []
+    if mask is not None:
+        dice_losses = []
+
+    cur_loss, next_loss = None, None
+    # X_pred = u_net(X)  # (B, 1, H, W)
+    # X_norm = normalizer(X)  # (B, 1, H, W)
+    # X_norm_pred = u_net(X_norm)
+    # next_loss = symmetric_loss(X_pred, X_norm_pred, loss_fn)
+    next_loss = compute_norm_loss_and_update(local_loader, normalizer, u_net, norm_opt, loss_fn, device)
+
+    num_steps = 0
+    # while cur_loss is None or abs((next_loss.item() - cur_loss) / cur_loss) > diff_rel:
+    while cur_loss is None or abs((next_loss - cur_loss) / cur_loss) > diff_rel:
+        cur_loss = next_loss
+        next_loss = compute_norm_loss_and_update(local_loader, normalizer, u_net, norm_opt, loss_fn, device)
+        losses.append(cur_loss)
+
+        # cur_loss = next_loss.item()
+        # losses.append(cur_loss)
+        # norm_opt.zero_grad()
+        # next_loss.backward()
+        # norm_opt.step()
+        # # torch.cuda.empty_cache()
+
+        # X_pred = u_net(X)  # (1, 1, H, W)
+        # X_norm = normalizer(X)  # (1, 1, H, W)
+        # X_norm_pred = u_net(X_norm)
+        # next_loss = symmetric_loss(X_pred, X_norm_pred, loss_fn)
+
+        if mask is not None:
+            with torch.no_grad():
+                dice_losses.append(dice_loss(u_net(normalizer(X)), mask).item())
+
+        num_steps += 1
+        print(f"current: {num_steps}/{max_iters}")
+        if num_steps > max_iters:
+            break
+
+    normalizer.eval()
+    if mask is not None:
+        fig_adapted = make_summary_plot_simplified(X, mask, normalizer, u_net, device=device)
+
+    fig, axis = plt.subplots()
+    axis.plot(losses, label="tta")
+    if mask is not None:
+        axis.plot(dice_losses, label="dice loss")
+    axis.legend()
+    axis.grid(True)
+
+    with torch.no_grad():
+        X_pred = u_net(normalizer(X))  # (1, K, H, W)
+    plt.close()
+
+    if mask is not None:
+        return X_pred.detach().cpu(), fig_orig, fig_adapted, fig
+
+    return X_pred.detach().cpu(), fig
+
+
+def evaluate_3d_adapt(X, mask, normalizer, u_net, norm_opt_config: dict, device=None, normalizer_cp=None,
+                      out_channels=4, max_iters=10, batch_size=1):
+    # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]; normalizer should be a copy
+    u_net.eval()
+    normalizer_cp.eval()
+
+    local_dataset = TensorDataset(X[0], mask[0])  # (D, H, W)
+    local_dataloader = DataLoader(local_dataset, batch_size=batch_size)
+
+    loss_orig = evaluate_3d_no_adapt(X, mask, normalizer_cp, u_net, device=device)
+    print(f"loss_orig: {loss_orig}")
+    D, H, W = X.shape[1:]
+    X_preds = torch.empty(D, out_channels, H, W)
+
+    for d, (X_cur, mask_cur) in enumerate(local_dataloader):
+        print(f"current d: {d + 1}/{D}")
+        # print(f"{X_cur.shape}, {mask_cur.shape}")
+        normalizer.load_state_dict(normalizer_cp.state_dict())
+        normalizer.train()
+        norm_opt = torch.optim.Adam(normalizer.parameters(), **norm_opt_config)
+        # X_cur, mask_cur = X[:, d:d + 1, ...], mask[:, d:d + 1, ...]
+        X_cur, mask_cur = X_cur.unsqueeze(0), mask_cur.unsqueeze(0)  # (1, 1, H, W)
+        X_pred, _, _, _ = test_time_adaptation(X_cur, mask_cur, normalizer, u_net, norm_opt, batch_size,
+                                               device=device, max_iters=max_iters)  # (1, K, H, W)
+        X_preds[d, ...] = X_pred
+
+    normalizer.eval()
+    loss = dice_loss_3d(X_preds.to(device), mask[0].to(device))
+
+    return loss.item()
+
+
+def evaluate_3d_adapt_batch(X, mask, normalizer, u_net, norm_opt_config: dict, device=None,
+                            max_iters=10, batch_size=4):
+    # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]; normalizer should be a copy
+    u_net.eval()
+    normalizer.train()
+    X = X[0].unsqueeze(1)  # (D, 1, H, W)
+    mask = mask[0].unsqueeze(1)
+    norm_opt = torch.optim.Adam(normalizer.parameters(), **norm_opt_config)
+    # (B, K, H, W)
+    X_pred, _, _, _ = test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
+                                           device=device, max_iters=max_iters)
+
+    normalizer.eval()
+    loss = dice_loss_3d(X_pred, mask[:, 0, ...])
+
+    return loss.item()
+
+
+def evaluate_3d_wrapper(evaluate_fn, dataset, normalizer, u_net, device=None, if_notebook=False, **kwargs):
     """
     Since (D, H, W): D is different for each patient, so a DataLoader is impossible. We use Dataset directly here with
     iteration.
@@ -39,7 +190,8 @@ def evaluate_3d_wrapper(evaluate_fn, dataset, normalizer, u_net, device=None, if
     loss_avg = 0
     for i in pbar:
         X, mask = dataset[i]  # (1, D, H, W), (1, D, H, W)
-        loss = evaluate_fn(X, mask, normalizer, u_net, device=device)
+        # loss = evaluate_fn(X, mask, normalizer, u_net, device=device)
+        loss = evaluate_fn(X, mask, normalizer, u_net, device=device, **kwargs)
         loss_avg += loss
         pbar.set_description(desc=f"batch {i + 1}/{len(dataset)}: loss: {loss:.4f}")
 
@@ -99,6 +251,8 @@ def make_summary_plot_simplified(X, mask, normalizer, u_net, if_show=False,
     if if_show:
         plt.show()
 
+    plt.close()
+
     return fig
 
 @torch.no_grad()
@@ -151,6 +305,8 @@ def make_summary_plot_2_by_2(X, mask, normalizer, u_net, if_show=False,
     if if_show:
         plt.show()
 
+    plt.close()
+
     return fig
 
 
@@ -202,6 +358,8 @@ def make_summary_plot_1_by_3(X, mask, normalizer, u_net, if_show=False,
 
     if if_show:
         plt.show()
+
+    plt.close()
 
     return fig
 
@@ -633,3 +791,49 @@ class AltTrainer(BasicTrainer):
     def _compute_u_net_loss(self, X, mask):
         # self.u_net.train(), self.normalizer.eval(): set outside the scope
         return self._compute_normalizer_loss(X, mask)
+
+
+class MetaLearner(BasicTrainer):
+    def __init__(self, test_dataset_dict, normalizer_cp, norm_opt_cp, num_batches_to_sample, num_learner_steps,
+                 **kwargs):
+        super(MetaLearner, self).__init__(**kwargs)
+        self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
+        self.normalizer_cp = normalizer_cp
+        self.norm_opt_cp = norm_opt_cp
+        self.num_batches_to_sample = num_batches_to_sample
+        self.num_learner_steps = num_learner_steps
+
+    def _train(self):
+        pass
+
+    def _meta_train(self):
+        pass
+
+    def _meta_learn(self):
+        pass
+
+    def _eval(self):
+        pass
+
+    def train(self):
+        pass
+
+    def _compute_normalizer_loss(self, X, mask):
+        pass
+
+    def _compute_u_net_loss(self, X, mask):
+        pass
+
+    def _end_epoch_plot(self):
+        ind = np.random.randint(len(self.test_loader.dataset))
+        X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
+        self.normalizer_cp.load_state_dict(self.normalizer.state_dict())
+        self.normalizer_cp.eval()
+        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+                                  self.weights["lam_dsc"] * dice_loss(X, mask)
+        _, fig_orig, fig_adapt, fig_loss_curve = test_time_adaptation(X.unsqueeze(0), mask.unsqueeze(0),
+                                                                      self.normalizer_cp, self.u_net, self.norm_opt_cp,
+                                                                      batch_size=1, loss_fn=loss_fn, device=self.device,
+                                                                      max_iters=self.num_learner_steps)
+
+        return fig_orig, fig_adapt, fig_loss_curve

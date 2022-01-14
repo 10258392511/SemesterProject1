@@ -307,3 +307,41 @@ def random_gamma_transform(X, gamma_min=0.5, gamma_max=2):
         X_out[i, 0] = torch.FloatTensor(img_out)
 
     return X_out.to(X.device)
+
+
+def normalize_tensor(X):
+    # X: (B, 1, H, W)
+    B, C, H, W = X.shape
+    X = X.view(B, C, -1)
+    X_min, _ = torch.min(X, dim=-1, keepdim=True)  # (B, 1, 1)
+    X_max, _ = torch.max(X, dim=-1, keepdim=True)  # (B, 1, 1)
+    X = (X - X_min) / (X_max - X_min)
+    X = X.view(B, C, H, W)
+
+    return X
+
+
+def random_contrast_transform(X, gamma_min=0.5, gamma_max=2, noise_min=0, noise_max=0.1,
+                              brightness_min=-1, brightness_max=1):
+    # X: (B, 1, H, W)
+    B = X.shape[0]
+    gamma = torch.rand((B, 1, 1, 1)) * (gamma_max - gamma_min) + gamma_min  # (B, 1, 1, 1)
+    gamma = gamma.to(X.device)
+    X = normalize_tensor(X ** gamma)
+
+    noise = torch.randn_like(X) * noise_max + noise_min
+    X = normalize_tensor(X + noise)
+
+    brightness = torch.rand((B, 1, 1, 1)) * (brightness_max - brightness_min) + brightness_min  # (B, 1, 1, 1)
+    brightness = brightness.to(X.device)
+    X = normalize_tensor(X + brightness)
+
+    return X
+
+
+def sample_from_loader(loader):
+    X, mask = None, None
+    for X, mask in loader:
+        break
+
+    return X, mask

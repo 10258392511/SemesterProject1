@@ -1,7 +1,7 @@
 # U-Net
 # u_net_params = dict(num_down_blocks=4, target_channels=4, in_channels=1, attention=False)
 u_net_params = dict(num_down_blocks=4, target_channels=4, in_channels=1, attention=True)
-# u_net_params = dict(num_down_blocks=4, target_channels=4, in_channels=16)
+# u_net_params = dict(num_down_blocks=4, target_channels=4, in_channels=16, attention=True)
 u_net_optimzer_params = dict(lr=1e-4)
 
 # Normalizer
