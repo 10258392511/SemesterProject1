@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
-from .utils import random_gamma_transform
+from .utils import random_gamma_transform, sample_from_loader
 
 
 @torch.no_grad()
@@ -101,7 +101,7 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
                 dice_losses.append(dice_loss(u_net(normalizer(X)), mask).item())
 
         num_steps += 1
-        print(f"current: {num_steps}/{max_iters}")
+        # print(f"current: {num_steps}/{max_iters}")
         if num_steps > max_iters:
             break
 
@@ -389,11 +389,11 @@ class BasicTrainer(object):
         self.time_stamp = time_stamp  # extended time_stamp
         self.device = torch.device("cuda") if device is None else torch.device(device)
 
-    def _train(self):
+    def _train(self, **kwargs):
         raise NotImplementedError
 
     @torch.no_grad()
-    def _eval(self):
+    def _eval(self, **kwargs):
         raise NotImplementedError
 
     def train(self):
@@ -432,7 +432,7 @@ class OnePassTrainer(BasicTrainer):
         super(OnePassTrainer, self).__init__(**kwargs)
         self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
 
-    def _train(self):
+    def _train(self, **kwargs):
         self.normalizer.train()
         self.u_net.train()
 
@@ -475,7 +475,7 @@ class OnePassTrainer(BasicTrainer):
         pbar.close()
 
     @torch.no_grad()
-    def _eval(self):
+    def _eval(self, **kwargs):
         self.normalizer.eval()
         self.u_net.eval()
 
@@ -619,7 +619,7 @@ class AltTrainer(BasicTrainer):
         super(AltTrainer, self).__init__(**kwargs)
         self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
 
-    def _train(self):
+    def _train(self, **kwargs):
         if self.notebook:
             from tqdm.notebook import tqdm
         else:
@@ -678,7 +678,7 @@ class AltTrainer(BasicTrainer):
         pbar.close()
 
     @torch.no_grad()
-    def _eval(self):
+    def _eval(self, **kwargs):
         self.normalizer.eval()
         self.u_net.eval()
 
@@ -794,45 +794,194 @@ class AltTrainer(BasicTrainer):
 
 
 class MetaLearner(BasicTrainer):
-    def __init__(self, test_dataset_dict, normalizer_cp, norm_opt_cp, num_batches_to_sample, num_learner_steps,
-                 **kwargs):
+    """
+    train_loader: with RandomSampler
+    """
+    def __init__(self, test_dataset_dict, normalizer_cp, norm_opt_config,
+                 num_batches_to_sample, num_learner_steps, **kwargs):
         super(MetaLearner, self).__init__(**kwargs)
         self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
         self.normalizer_cp = normalizer_cp
-        self.norm_opt_cp = norm_opt_cp
         self.num_batches_to_sample = num_batches_to_sample
         self.num_learner_steps = num_learner_steps
+        self.norm_opt_config = norm_opt_config
 
-    def _train(self):
-        pass
+    def _train(self, **kwargs):
+        batches = []
+        for i in range(self.num_batches_to_sample):
+            batches.append(sample_from_loader(self.train_loader))
 
-    def _meta_train(self):
-        pass
+        self._meta_train(batches)
+        loss_avg_all_train = self._meta_learn(batches)
 
-    def _meta_learn(self):
-        pass
+        del batches
+        return loss_avg_all_train
 
-    def _eval(self):
-        pass
+    def _meta_train(self, batches):
+        self.u_net.eval()
+        self.normalizer.train()
+        fig, axis = plt.subplots()
+        learner_losses = []  # (B * num_learner_steps,)
+        xticks = []
 
-    def train(self):
-        pass
+        for b, (X, _) in enumerate(batches):
+            # X: (B, 1, H, W)
+            X = X.to(self.device)
+            for i in range(self.num_learner_steps):
+                loss_unsup = self._compute_normalizer_loss(X)
+                self.norm_opt.zero_grad()
+                loss_unsup.backward()
+                self.norm_opt.step()
+                learner_losses.append(loss_unsup.item())
+                xticks.append(float(f"{b}.{i}"))
 
-    def _compute_normalizer_loss(self, X, mask):
-        pass
+        axis.plot(xticks, learner_losses)
+        axis.grid(True)
+        plt.close()
+        # loss curve is summarized per epoch
+        self.writer.add_figure("learner_traj_epoch", fig, self.global_steps["epoch"])
+
+    def _meta_learn(self, batches):
+        self.u_net.train()
+        self.normalizer.train()
+
+        loss_avg_all_train = 0
+        num_samples = 0
+        for X, mask in batches:
+            # X: (B, 1, H, W)
+            X = X.to(self.device)
+            mask = mask.to(self.device)
+            loss_sup = self._compute_u_net_loss(X, mask)
+            self.norm_opt.zero_grad()
+            self.u_net_opt.zero_grad()
+            loss_sup.backward()
+            self.norm_opt.step()
+            self.u_net_opt.step()
+
+            loss_avg_all_train += loss_sup.item() * X.shape[0]
+            num_samples += X.shape[0]
+            self.writer.add_scalar("loss_meta_learn", loss_sup.item(), self.global_steps["train"])
+            self.global_steps["train"] += 1
+
+        loss_avg_all_train /= num_samples
+        self.writer.add_scalar("train_epoch", loss_avg_all_train, self.global_steps["epoch"])
+
+        return loss_avg_all_train
+
+    @torch.no_grad()
+    def _eval(self, **kwargs):
+        self.normalizer.eval()
+        self.u_net.eval()
+
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.eval_loader), total=len(self.eval_loader), desc="eval", leave=False)
+
+        loss_sup_avg = 0
+        num_samples = 0
+        for i, (X, mask) in pbar:
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
+            X = X.to(self.device)
+            mask = mask.to(self.device)
+            loss_sup = self._compute_u_net_loss(X, mask)
+            loss_sup_avg += loss_sup * X.shape[0]
+            num_samples += X.shape[0]
+
+            pbar.set_description(f"batch {i + 1}/{len(self.eval_loader)}: loss_sup: {loss_sup.item():.4f}")
+
+        loss_sup_avg /= num_samples
+
+        self.writer.add_scalar("eval_loss", loss_sup_avg, self.global_steps["eval"])
+        self.global_steps["eval"] += 1
+        pbar.close()
+
+        return loss_sup_avg
+
+    def train(self, **kwargs):
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
+        pbar = trange(self.epochs, desc="epoch")
+
+        self._create_save_dir()
+        lowest_loss = float("inf")
+
+        for epoch in pbar:
+            loss_avg_all_train = self._train()
+            loss_avg_all_eval = self._eval()
+
+            if self.scheduler is not None:
+                self.scheduler.step()
+
+            fig_orig, fig_adapt, fig_loss_curve = self._end_epoch_plot()
+            self.writer.add_figure("epoch_plot_orig", fig_orig, self.global_steps["epoch"])
+            self.writer.add_figure("epoch_plot_adapt", fig_adapt, self.global_steps["epoch"])
+            self.writer.add_figure("epoch_plot_curve", fig_loss_curve, self.global_steps["epoch"])
+            if loss_avg_all_eval < lowest_loss:
+                self._save_params(epoch, loss_avg_all_eval)
+                lowest_loss = loss_avg_all_eval
+
+            interval = kwargs.get("eval_3d_interval", 1)
+            if epoch % interval == 0:
+                losses_eval_3d = {}
+                for key in self.test_dataset_dict:
+                    dataset = self.test_dataset_dict[key]
+                    loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer, self.u_net,
+                                               self.device, self.notebook, norm_opt_config=self.norm_opt_config,
+                                               max_iters=self.num_learner_steps)
+                    losses_eval_3d[key] = loss
+
+            for key in losses_eval_3d:
+                self.writer.add_scalar(f"epoch_3d_{key}", losses_eval_3d[key], self.global_steps["epoch"])
+
+            cur_loss = sum(list(losses_eval_3d.values())) / 3
+            self.writer.add_scalar(f"epoch_3d_avg", cur_loss, self.global_steps["epoch"])
+            # if cur_loss < lowest_loss:
+            #     self._save_params(epoch, cur_loss)
+            #     lowest_loss = cur_loss
+
+            eval_3d_loss_desc = ""
+            for key in losses_eval_3d:
+                eval_3d_loss_desc += f", loss_3d_{key}: {losses_eval_3d[key]:.4f}"
+            pbar.set_description(f"epoch {epoch + 1}/{self.epochs}, loss_train: {loss_avg_all_train:.4f}, "
+                                 f"loss_eval: {loss_avg_all_eval:.4f}" + eval_3d_loss_desc)
+            self.global_steps["epoch"] += 1
+
+    def _compute_normalizer_loss(self, X):
+        # X: (B, 1, H, W)
+        X = 2 * X - 1
+        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+                                  self.weights["lam_dsc"] * dice_loss(X, mask)
+        X_pred = self.u_net(X)
+        X_norm_pred = self.u_net(self.normalizer(X))
+
+        return symmetric_loss(X_pred, X_norm_pred, loss_fn)
 
     def _compute_u_net_loss(self, X, mask):
-        pass
+        # X: (B, 1, H, W)
+        X = 2 * X - 1
+        loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+                                  self.weights["lam_dsc"] * dice_loss(X, mask)
+        X_norm_pred = self.u_net(self.normalizer(X))
+
+        return loss_fn(X_norm_pred, mask)
 
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))
         X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
         self.normalizer_cp.load_state_dict(self.normalizer.state_dict())
         self.normalizer_cp.eval()
+        norm_opt_cp = torch.optim.Adam(self.normalizer_cp.parameters(), **self.norm_opt_config)
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
         _, fig_orig, fig_adapt, fig_loss_curve = test_time_adaptation(X.unsqueeze(0), mask.unsqueeze(0),
-                                                                      self.normalizer_cp, self.u_net, self.norm_opt_cp,
+                                                                      self.normalizer_cp, self.u_net, norm_opt_cp,
                                                                       batch_size=1, loss_fn=loss_fn, device=self.device,
                                                                       max_iters=self.num_learner_steps)
 
