@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
-from .utils import random_gamma_transform, sample_from_loader
+from .utils import random_gamma_transform, sample_from_loader, random_contrast_transform
 
 
 @torch.no_grad()
@@ -733,7 +733,9 @@ class AltTrainer(BasicTrainer):
             self._train()
             loss_all_avg = self._eval()
             if self.scheduler is not None:
-                self.scheduler.step()
+                for scheduler_iter in self.scheduler:
+                    scheduler_iter.step()
+                    scheduler_iter.print_lr()
 
             fig = self._end_epoch_plot()
             losses_eval_3d = {}
@@ -798,15 +800,21 @@ class MetaLearner(BasicTrainer):
     train_loader: with RandomSampler
     """
     def __init__(self, test_dataset_dict, normalizer_cp, norm_opt_config,
-                 num_batches_to_sample, num_learner_steps, **kwargs):
+                 num_batches_to_sample, num_learner_steps, total_steps=10000, eval_interval=100, **kwargs):
         super(MetaLearner, self).__init__(**kwargs)
         self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
         self.normalizer_cp = normalizer_cp
         self.num_batches_to_sample = num_batches_to_sample
         self.num_learner_steps = num_learner_steps
         self.norm_opt_config = norm_opt_config
+        self.total_steps = total_steps
+        self.epochs = total_steps // num_batches_to_sample
+        self.global_steps["eval_3d"] = 0
+        self.eval_interval = eval_interval
+        self.eval_interval_epoch = int(self.epochs * eval_interval / total_steps)
 
     def _train(self, **kwargs):
+        # print("training...")
         batches = []
         for i in range(self.num_batches_to_sample):
             batches.append(sample_from_loader(self.train_loader))
@@ -914,21 +922,25 @@ class MetaLearner(BasicTrainer):
 
         for epoch in pbar:
             loss_avg_all_train = self._train()
-            loss_avg_all_eval = self._eval()
 
             if self.scheduler is not None:
-                self.scheduler.step()
+                for scheduler_iter in self.scheduler:
+                    scheduler_iter.step()
+                    # for param_group in scheduler_iter.optimizer.param_groups:
+                    #     print(f"current lr: {param_group['lr']}")
 
-            fig_orig, fig_adapt, fig_loss_curve = self._end_epoch_plot()
-            self.writer.add_figure("epoch_plot_orig", fig_orig, self.global_steps["epoch"])
-            self.writer.add_figure("epoch_plot_adapt", fig_adapt, self.global_steps["epoch"])
-            self.writer.add_figure("epoch_plot_curve", fig_loss_curve, self.global_steps["epoch"])
-            if loss_avg_all_eval < lowest_loss:
-                self._save_params(epoch, loss_avg_all_eval)
-                lowest_loss = loss_avg_all_eval
+            # interval = kwargs.get("eval_3d_interval", 1)
+            # if epoch % interval == 0:
+            if epoch % self.eval_interval_epoch == 0 or epoch == 0 or epoch == self.epochs - 1:
+                # print("evaluation")
+                # continue
 
-            interval = kwargs.get("eval_3d_interval", 1)
-            if epoch % interval == 0:
+                loss_avg_all_eval = self._eval()
+                # if loss_avg_all_eval < lowest_loss:
+                #     self._save_params(epoch, loss_avg_all_eval)
+                #     # self._save_params(self.global_steps["train"], loss_avg_all_eval)
+                #     lowest_loss = loss_avg_all_eval
+
                 losses_eval_3d = {}
                 for key in self.test_dataset_dict:
                     dataset = self.test_dataset_dict[key]
@@ -937,40 +949,56 @@ class MetaLearner(BasicTrainer):
                                                max_iters=self.num_learner_steps)
                     losses_eval_3d[key] = loss
 
-            for key in losses_eval_3d:
-                self.writer.add_scalar(f"epoch_3d_{key}", losses_eval_3d[key], self.global_steps["epoch"])
+                for key in losses_eval_3d:
+                    self.writer.add_scalar(f"epoch_3d_{key}", losses_eval_3d[key], self.global_steps["eval_3d"])
 
-            cur_loss = sum(list(losses_eval_3d.values())) / 3
-            self.writer.add_scalar(f"epoch_3d_avg", cur_loss, self.global_steps["epoch"])
-            # if cur_loss < lowest_loss:
-            #     self._save_params(epoch, cur_loss)
-            #     lowest_loss = cur_loss
+                cur_loss = sum(list(losses_eval_3d.values())) / 3
+                self.writer.add_scalar(f"epoch_3d_avg", cur_loss, self.global_steps["eval_3d"])
+                if cur_loss < lowest_loss:
+                    self._save_params(epoch, cur_loss)
+                    lowest_loss = cur_loss
+
+                fig_orig, fig_adapt, fig_loss_curve = self._end_epoch_plot()
+                self.writer.add_figure("epoch_plot_orig", fig_orig, self.global_steps["eval_3d"])
+                self.writer.add_figure("epoch_plot_adapt", fig_adapt, self.global_steps["eval_3d"])
+                self.writer.add_figure("epoch_plot_curve", fig_loss_curve, self.global_steps["eval_3d"])
+                self.global_steps["eval_3d"] += 1
+
+            # loss_avg_all_eval = 0
+            # losses_eval_3d = {}
 
             eval_3d_loss_desc = ""
             for key in losses_eval_3d:
                 eval_3d_loss_desc += f", loss_3d_{key}: {losses_eval_3d[key]:.4f}"
             pbar.set_description(f"epoch {epoch + 1}/{self.epochs}, loss_train: {loss_avg_all_train:.4f}, "
                                  f"loss_eval: {loss_avg_all_eval:.4f}" + eval_3d_loss_desc)
+
             self.global_steps["epoch"] += 1
+            self.writer.flush()
 
     def _compute_normalizer_loss(self, X):
         # X: (B, 1, H, W)
+        X_aug = random_contrast_transform(X)
         X = 2 * X - 1
+        X_aug = 2 * X_aug - 1
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
-        X_pred = self.u_net(X)
+        X_pred = self.u_net(X_aug)
         X_norm_pred = self.u_net(self.normalizer(X))
 
         return symmetric_loss(X_pred, X_norm_pred, loss_fn)
 
     def _compute_u_net_loss(self, X, mask):
         # X: (B, 1, H, W)
+        X_orig = X.clone()
         X = 2 * X - 1
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
         X_norm_pred = self.u_net(self.normalizer(X))
 
-        return loss_fn(X_norm_pred, mask)
+        loss_unsup = self._compute_normalizer_loss(X_orig)
+
+        return loss_fn(X_norm_pred, mask) + self.weights["lam_smooth"] * loss_unsup
 
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))
