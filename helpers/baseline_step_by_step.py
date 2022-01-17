@@ -153,9 +153,10 @@ def evaluate_3d_adapt(X, mask, normalizer, u_net, norm_opt_config: dict, device=
         X_preds[d, ...] = X_pred
 
     normalizer.eval()
-    loss = dice_loss_3d(X_preds.to(device), mask[0].to(device))
+    loss = dice_loss_3d(X_preds.to(device), mask[0].to(device)).item()
+    del X_preds
 
-    return loss.item()
+    return loss
 
 
 def evaluate_3d_adapt_batch(X, mask, normalizer, u_net, norm_opt_config: dict, device=None,
@@ -167,13 +168,14 @@ def evaluate_3d_adapt_batch(X, mask, normalizer, u_net, norm_opt_config: dict, d
     mask = mask[0].unsqueeze(1)
     norm_opt = torch.optim.Adam(normalizer.parameters(), **norm_opt_config)
     # (B, K, H, W)
-    X_pred, _, _, _ = test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
+    X_pred, _, = test_time_adaptation(X, None, normalizer, u_net, norm_opt, batch_size,
                                            device=device, max_iters=max_iters)
 
     normalizer.eval()
-    loss = dice_loss_3d(X_pred, mask[:, 0, ...])
+    loss = dice_loss_3d(X_pred, mask[:, 0, ...]).item()
+    del X_pred
 
-    return loss.item()
+    return loss
 
 
 def evaluate_3d_wrapper(evaluate_fn, dataset, normalizer, u_net, device=None, if_notebook=False, **kwargs):
@@ -846,6 +848,8 @@ class MetaLearner(BasicTrainer):
         axis.plot(xticks, learner_losses)
         axis.grid(True)
         plt.close()
+        del learner_losses
+        del xticks
         # loss curve is summarized per epoch
         self.writer.add_figure("learner_traj_epoch", fig, self.global_steps["epoch"])
 
