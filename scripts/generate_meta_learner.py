@@ -48,7 +48,7 @@ if __name__ == '__main__':
     learner_steps = [1, 5, 10, 20]
     for num_batches_iter in num_batches:
         for learner_steps_iter in learner_steps:
-            hyper_params[1].append({"lam_smooth": 0., "num_batches_to_sample": num_batches_iter,
+            hyper_params[1].append({"lam_smooth": 0.01, "num_batches_to_sample": num_batches_iter,
                                     "num_learner_steps": learner_steps_iter})
 
     # set 2: extra
