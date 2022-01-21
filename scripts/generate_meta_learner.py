@@ -21,7 +21,7 @@ then
     mkdir params
 fi
 
-python ./run_meta_learning.py --train_source_name "csf" --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 6 --num_workers 3 --lam_smooth {hyper_param_dict["lam_smooth"]} --num_batches_to_sample {hyper_param_dict["num_batches_to_sample"]} --num_learner_steps {hyper_param_dict["num_learner_steps"]}"""
+python ./run_meta_learning.py --train_source_name "csf" --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 6 --num_workers 3 --lam_smooth {hyper_param_dict["lam_smooth"]} --num_batches_to_sample {hyper_param_dict["num_batches_to_sample"]} --num_learner_steps {hyper_param_dict["num_learner_steps"]} --pre_train_epochs {hyper_param_dict["pre_train_epochs"]}"""
 
     return bash_script
 
@@ -49,10 +49,15 @@ if __name__ == '__main__':
     for num_batches_iter in num_batches:
         for learner_steps_iter in learner_steps:
             hyper_params[1].append({"lam_smooth": 0.01, "num_batches_to_sample": num_batches_iter,
-                                    "num_learner_steps": learner_steps_iter})
+                                    "num_learner_steps": learner_steps_iter, "pre_train_epochs": 5})
 
     # set 2: extra
-    hyper_params[2] = [{"lam_smooth": 0., "num_batches_to_sample": 5, "num_learner_steps": 5}]
+    hyper_params[2] = []
+    # hyper_params[2] = [{"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": 10}]
+    learner_steps = [1, 10, 20, 50]
+    for learner_steps_iter in learner_steps:
+        hyper_params[1].append({"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": learner_steps_iter,
+                                "pre_train_epochs": 5})
 
     hyper_params_list = hyper_params[args.set_num]
     for hyper_param_dict_iter in hyper_params_list:

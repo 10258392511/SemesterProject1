@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 
 from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
+from torchvision.utils import make_grid
 from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
 from .utils import random_gamma_transform, sample_from_loader, random_contrast_transform
 
@@ -31,16 +32,31 @@ def compute_norm_loss_and_update(data_loader, normalizer, u_net, norm_opt,  loss
     normalizer.train()
     loss_acc = 0
     num_samples = 0
-    for X in data_loader:
-        X = (2 * X - 1).float().to(device)
-        X_pred = u_net(X)
-        X_norm_pred = u_net(normalizer(X))
-        loss = symmetric_loss(X_pred, X_norm_pred, loss_fn) * X.shape[0]
+    # original implementation
+    # for X in data_loader:
+    #     X = (2 * X - 1).float().to(device)
+    #     X_pred = u_net(X)
+    #     X_norm_pred = u_net(normalizer(X))
+    #     loss = symmetric_loss(X_pred, X_norm_pred, loss_fn)
+    #
+    #     norm_opt.zero_grad()
+    #     loss.backward()
+    #     norm_opt.step()
+    #     loss_acc += loss.item() * X.shape[0]
+    #     num_samples += X.shape[0]
+
+    for X1, X2 in data_loader:
+        X1 = (2 * X1 - 1).float().to(device)
+        X2 = (2 * X2 - 1).float().to(device)
+        X_norm_pred_1 = u_net(normalizer(X1))
+        X_norm_pred_2 = u_net(normalizer(X2))
+        loss = symmetric_loss(X_norm_pred_1, X_norm_pred_2, loss_fn)
+
         norm_opt.zero_grad()
         loss.backward()
         norm_opt.step()
-        loss_acc += loss.item() * X.shape[0]
-        num_samples += X.shape[0]
+        loss_acc += loss.item() * X1.shape[0]
+        num_samples += X1.shape[0]
 
     return loss_acc / num_samples
 
@@ -59,7 +75,14 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
 
     u_net.eval()
     normalizer.train()
-    local_loader = DataLoader(X, batch_size=batch_size)
+
+    # original implementation
+    # local_loader = DataLoader(X, batch_size=batch_size)
+
+    X_aug_1 = random_contrast_transform(X)
+    X_aug_2 = random_contrast_transform(X)
+    local_dataset = TensorDataset(X_aug_1, X_aug_2)
+    local_loader = DataLoader(local_dataset, batch_size=batch_size)
 
     X = (2 * X - 1).float().to(device)
 
@@ -802,7 +825,8 @@ class MetaLearner(BasicTrainer):
     train_loader: with RandomSampler
     """
     def __init__(self, test_dataset_dict, normalizer_cp, norm_opt_config,
-                 num_batches_to_sample, num_learner_steps, total_steps=10000, eval_interval=100, **kwargs):
+                 num_batches_to_sample, num_learner_steps, total_steps=10000, eval_interval=100, pre_train_epochs=20,
+                 **kwargs):
         super(MetaLearner, self).__init__(**kwargs)
         self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
         self.normalizer_cp = normalizer_cp
@@ -811,19 +835,94 @@ class MetaLearner(BasicTrainer):
         self.norm_opt_config = norm_opt_config
         self.total_steps = total_steps
         self.epochs = total_steps // num_batches_to_sample
+
         self.global_steps["eval_3d"] = 0
+        self.global_steps["pre_train"] = 0
+        self.global_steps["pre_train_eval"] = 0
+        self.global_steps["pre_train_epochs"] = 0
+
         self.eval_interval = eval_interval
         self.eval_interval_epoch = int(self.epochs * eval_interval / total_steps)
+        self.pretrain_epochs = pre_train_epochs
+
+    # def _train(self, **kwargs):
+    #     # print("training...")
+    #     batches = []
+    #     for i in range(self.num_batches_to_sample):
+    #         batches.append(sample_from_loader(self.train_loader))
+    #
+    #     self._meta_train(batches)
+    #     loss_avg_all_train = self._meta_learn(batches)
+    #
+    #     del batches
+    #     return loss_avg_all_train
+    #
+    # def _meta_train(self, batches):
+    #     self.u_net.eval()
+    #     self.normalizer.train()
+    #     fig, axis = plt.subplots()
+    #     learner_losses = []  # (B * num_learner_steps,)
+    #     xticks = []
+    #
+    #     for b, (X, _) in enumerate(batches):
+    #         # X: (B, 1, H, W)
+    #         X = X.to(self.device)
+    #         for i in range(self.num_learner_steps):
+    #             loss_unsup = self._compute_normalizer_loss(X)
+    #             self.norm_opt.zero_grad()
+    #             loss_unsup.backward()
+    #             self.norm_opt.step()
+    #             learner_losses.append(loss_unsup.item())
+    #             # xticks.append(float(f"{b}.{i}"))
+    #             xticks.append(b + i / 1000)
+    #
+    #     axis.plot(xticks, learner_losses)
+    #     axis.grid(True)
+    #     plt.close()
+    #     del learner_losses
+    #     del xticks
+    #     # loss curve is summarized per epoch
+    #     self.writer.add_figure("learner_traj_epoch", fig, self.global_steps["epoch"])
+    #
+    # def _meta_learn(self, batches):
+    #     self.u_net.train()
+    #     self.normalizer.train()
+    #
+    #     loss_avg_all_train = 0
+    #     num_samples = 0
+    #     for X, mask in batches:
+    #         # X: (B, 1, H, W)
+    #         X = X.to(self.device)
+    #         mask = mask.to(self.device)
+    #         loss_sup = self._compute_u_net_loss(X, mask)
+    #         self.norm_opt.zero_grad()
+    #         self.u_net_opt.zero_grad()
+    #         loss_sup.backward()
+    #         self.norm_opt.step()
+    #         self.u_net_opt.step()
+    #
+    #         loss_avg_all_train += loss_sup.item() * X.shape[0]
+    #         num_samples += X.shape[0]
+    #         self.writer.add_scalar("loss_meta_learn", loss_sup.item(), self.global_steps["train"])
+    #         self.global_steps["train"] += 1
+    #
+    #     loss_avg_all_train /= num_samples
+    #     self.writer.add_scalar("train_epoch", loss_avg_all_train, self.global_steps["epoch"])
+    #
+    #     return loss_avg_all_train
 
     def _train(self, **kwargs):
         # print("training...")
-        batches = []
+        batches_unsup, batches = [], []
         for i in range(self.num_batches_to_sample):
-            batches.append(sample_from_loader(self.train_loader))
+            X, mask = sample_from_loader(self.train_loader)
+            batches_unsup.append((random_contrast_transform(X), random_contrast_transform(X)))
+            batches.append((X, mask))
 
-        self._meta_train(batches)
+        self._meta_train(batches_unsup)
         loss_avg_all_train = self._meta_learn(batches)
 
+        del batches_unsup
         del batches
         return loss_avg_all_train
 
@@ -834,16 +933,18 @@ class MetaLearner(BasicTrainer):
         learner_losses = []  # (B * num_learner_steps,)
         xticks = []
 
-        for b, (X, _) in enumerate(batches):
+        for b, (X1, X2) in enumerate(batches):
             # X: (B, 1, H, W)
-            X = X.to(self.device)
+            X1 = X1.to(self.device)
+            X2 = X2.to(self.device)
             for i in range(self.num_learner_steps):
-                loss_unsup = self._compute_normalizer_loss(X)
+                loss_unsup = self._compute_normalizer_loss(X1, X2)
                 self.norm_opt.zero_grad()
                 loss_unsup.backward()
                 self.norm_opt.step()
                 learner_losses.append(loss_unsup.item())
-                xticks.append(float(f"{b}.{i}"))
+                # xticks.append(float(f"{b}.{i}"))
+                xticks.append(b + i / 1000)
 
         axis.plot(xticks, learner_losses)
         axis.grid(True)
@@ -877,6 +978,42 @@ class MetaLearner(BasicTrainer):
 
         loss_avg_all_train /= num_samples
         self.writer.add_scalar("train_epoch", loss_avg_all_train, self.global_steps["epoch"])
+
+        return loss_avg_all_train
+
+    def _pre_train(self, **kwargs):
+        self.u_net.train()
+        self.normalizer.train()
+
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.train_loader), total=len(self.train_loader), desc="train", leave=False)
+
+        loss_avg_all_train = 0
+        num_samples = 0
+        for i, (X, mask) in pbar:
+            # X: (B, 1, H, W)
+            X = X.to(self.device)
+            mask = mask.to(self.device)
+            loss_sup = self._compute_u_net_loss(X, mask)
+            self.norm_opt.zero_grad()
+            self.u_net_opt.zero_grad()
+            loss_sup.backward()
+            self.norm_opt.step()
+            self.u_net_opt.step()
+
+            pbar.set_description(f"batch {i + 1}/{len(self.train_loader)}: loss_sup: {loss_sup.item():.4f}")
+
+            loss_avg_all_train += loss_sup.item() * X.shape[0]
+            num_samples += X.shape[0]
+            self.writer.add_scalar("pre_train", loss_sup.item(), self.global_steps["pre_train"])
+            self.global_steps["pre_train"] += 1
+
+        loss_avg_all_train /= num_samples
+        self.writer.add_scalar("pre_train_epoch", loss_avg_all_train, self.global_steps["pre_train_epochs"])
+        pbar.close()
 
         return loss_avg_all_train
 
@@ -914,15 +1051,58 @@ class MetaLearner(BasicTrainer):
 
         return loss_sup_avg
 
+    @torch.no_grad()
+    def _pre_train_eval(self, **kwargs):
+        self.normalizer.eval()
+        self.u_net.eval()
+
+        if self.notebook:
+            from tqdm.notebook import tqdm
+        else:
+            from tqdm import tqdm
+        pbar = tqdm(enumerate(self.eval_loader), total=len(self.eval_loader), desc="eval", leave=False)
+
+        loss_sup_avg = 0
+        num_samples = 0
+        for i, (X, mask) in pbar:
+            # # debug only #
+            # if i > 2:
+            #     break
+            # ################
+            X = X.to(self.device)
+            mask = mask.to(self.device)
+            loss_sup = self._compute_u_net_loss(X, mask)
+            loss_sup_avg += loss_sup * X.shape[0]
+            num_samples += X.shape[0]
+
+            pbar.set_description(f"batch {i + 1}/{len(self.eval_loader)}: loss_sup: {loss_sup.item():.4f}")
+
+        loss_sup_avg /= num_samples
+
+        self.writer.add_scalar("pre_train_eval", loss_sup_avg, self.global_steps["pre_train_eval"])
+        self.global_steps["pre_train_eval"] += 1
+        pbar.close()
+
+        return loss_sup_avg
+
     def train(self, **kwargs):
         if self.notebook:
             from tqdm.notebook import trange
         else:
             from tqdm import trange
-        pbar = trange(self.epochs, desc="epoch")
 
         self._create_save_dir()
         lowest_loss = float("inf")
+
+        pbar = trange(self.pretrain_epochs, desc="pre_train")
+        for epoch in pbar:
+            pre_train_loss_avg = self._pre_train()
+            pre_train_eval_avg = self._pre_train_eval()
+            self.global_steps["pre_train_epochs"] += 1
+            pbar.set_description(f"epoch {epoch + 1}/{self.pretrain_epochs}: loss_train: {pre_train_loss_avg:.4f}, "
+                                 f"loss_eval: {pre_train_eval_avg:.4f}")
+
+        pbar = trange(self.epochs, desc="epoch")
 
         for epoch in pbar:
             loss_avg_all_train = self._train()
@@ -947,8 +1127,10 @@ class MetaLearner(BasicTrainer):
 
                 losses_eval_3d = {}
                 for key in self.test_dataset_dict:
+                    self.normalizer_cp.load_state_dict(self.normalizer.state_dict())
+                    self.normalizer_cp.eval()
                     dataset = self.test_dataset_dict[key]
-                    loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer, self.u_net,
+                    loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer_cp, self.u_net,
                                                self.device, self.notebook, norm_opt_config=self.norm_opt_config,
                                                max_iters=self.num_learner_steps)
                     losses_eval_3d[key] = loss
@@ -980,17 +1162,39 @@ class MetaLearner(BasicTrainer):
             self.global_steps["epoch"] += 1
             self.writer.flush()
 
-    def _compute_normalizer_loss(self, X):
-        # X: (B, 1, H, W)
-        X_aug = random_contrast_transform(X)
-        X = 2 * X - 1
-        X_aug = 2 * X_aug - 1
+    # def _compute_normalizer_loss_old(self, X):
+    #     # X: (B, 1, H, W)
+    #     # original implementation
+    #     X_aug = random_contrast_transform(X)
+    #     X = 2 * X - 1
+    #     X_aug = 2 * X_aug - 1
+    #     loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
+    #                               self.weights["lam_dsc"] * dice_loss(X, mask)
+    #     X_pred = self.u_net(X_aug)
+    #     X_norm_pred = self.u_net(self.normalizer(X))
+    #
+    #     return symmetric_loss(X_pred, X_norm_pred, loss_fn)
+
+    def _compute_normalizer_loss(self, X1, X2):
+        # two transforms
+        X_aug_1 = 2 * X1 - 1
+        X_aug_2 = 2 * X2 - 1
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
-        X_pred = self.u_net(X_aug)
-        X_norm_pred = self.u_net(self.normalizer(X))
+        X_norm_pred_1 = self.u_net(self.normalizer(X_aug_1))
+        X_norm_pred_2 = self.u_net(self.normalizer(X_aug_2))
 
-        return symmetric_loss(X_pred, X_norm_pred, loss_fn)
+        return symmetric_loss(X_norm_pred_1, X_norm_pred_2, loss_fn)
+
+    def _compute_normalizer_loss_entropy(self, X, X_dumb=None):
+        X = 2 * X - 1
+        X_norm_pred = self.u_net(self.normalizer(X))  # (B, K, H, W)
+        S = torch.softmax(X_norm_pred, dim=1)
+        S_log = -torch.log(S)
+        S = S * S_log  # (B, K, H, W)
+        S_mean = S.mean(dim=1)  # (B, H, W)
+
+        return S_mean.mean()
 
     def _compute_u_net_loss(self, X, mask):
         # X: (B, 1, H, W)
@@ -1000,9 +1204,11 @@ class MetaLearner(BasicTrainer):
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
         X_norm_pred = self.u_net(self.normalizer(X))
 
-        loss_unsup = self._compute_normalizer_loss(X_orig)
+        # loss_unsup = self._compute_normalizer_loss(X_orig)
+        #
+        # return loss_fn(X_norm_pred, mask) + self.weights["lam_smooth"] * loss_unsup
 
-        return loss_fn(X_norm_pred, mask) + self.weights["lam_smooth"] * loss_unsup
+        return loss_fn(X_norm_pred, mask)
 
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))
@@ -1018,3 +1224,100 @@ class MetaLearner(BasicTrainer):
                                                                       max_iters=self.num_learner_steps)
 
         return fig_orig, fig_adapt, fig_loss_curve
+
+    @torch.no_grad()
+    def _make_and_save_fig_from_tensor(self, X, title, filename):
+        # X: (B, 1, H, W)
+        # print(f"{title}: {X.shape}")
+        X_grid = make_grid(X.detach().cpu(), nrow=2)  # (3, H', W')
+        # print(f"{title}_grid: {X_grid.shape}")
+        fig, axis = plt.subplots()
+        axis.imshow(X_grid[0], cmap="gray")
+        axis.set_title(title)
+        fig.savefig(filename)
+        plt.close()
+
+    def meta_train_vis(self, loss_type="data-consistency", norm=None, u_net=None):
+        # norm, u_net: GPU
+        assert loss_type in ["data-consistency", "avg-entropy"]
+        self._create_save_dir()
+
+        if norm is None or u_net is None:
+            if self.notebook:
+                from tqdm.notebook import trange
+            else:
+                from tqdm import trange
+
+            # self._create_save_dir()
+            # lowest_loss = float("inf")
+
+            pbar = trange(self.pretrain_epochs, desc="pre_train")
+            for epoch in pbar:
+                pre_train_loss_avg = self._pre_train()
+                pre_train_eval_avg = self._pre_train_eval()
+                self.global_steps["pre_train_epochs"] += 1
+                pbar.set_description(f"epoch {epoch + 1}/{self.pretrain_epochs}: loss_train: {pre_train_loss_avg:.4f}, "
+                                     f"loss_eval: {pre_train_eval_avg:.4f}")
+
+            self._save_params(self.pretrain_epochs, pre_train_eval_avg)
+
+        else:
+            self.normalizer.load_state_dict(norm.state_dict())
+            self.u_net.load_state_dict(u_net.state_dict())
+
+        X, mask = sample_from_loader(self.train_loader)  # (B, 1, H, W)
+        X_aug_1, X_aug_2 = random_contrast_transform(X), random_contrast_transform(X)
+        X = X.to(self.device)
+        mask = mask.to(self.device)
+        X_aug_1 = X_aug_1.to(self.device)
+        X_aug_2 = X_aug_2.to(self.device)
+        with torch.no_grad():
+            X_pred = self.u_net(self.normalizer(2 * X - 1)).argmax(dim=1, keepdim=True)  # (B, 1, H, W)
+            X_aug_1_pred = self.u_net(self.normalizer(2 * X_aug_1 - 1)).argmax(dim=1, keepdim=True)
+            X_aug_2_pred = self.u_net(self.normalizer( 2 * X_aug_2 - 1)).argmax(dim=1, keepdim=True)
+
+        self.normalizer.train()
+        self.u_net.eval()
+
+        fig, axis = plt.subplots()
+        learner_losses = []  # (B * num_learner_steps,)
+        xticks = []
+
+        for i in range(self.num_learner_steps):
+            if loss_type == "data-consistency":
+                loss_unsup = self._compute_normalizer_loss(X_aug_1, X_aug_2)
+            elif loss_type == "avg-entropy":
+                loss_unsup = self._compute_normalizer_loss_entropy(X, None)
+            self.norm_opt.zero_grad()
+            loss_unsup.backward()
+            self.norm_opt.step()
+            learner_losses.append(loss_unsup.item())
+            # xticks.append(float(f"{b}.{i}"))
+            xticks.append(i)
+
+        axis.plot(xticks, learner_losses)
+        axis.grid(True)
+        plt.close()
+
+        print("Done adaptation!")
+        self.normalizer.eval()
+        X_pred_adapt = self.u_net(self.normalizer(2 * X - 1)).argmax(dim=1, keepdim=True)  # (B, 1, H, W)
+        X_aug_1_pred_adapt = self.u_net(self.normalizer(2 * X_aug_1 - 1)).argmax(dim=1, keepdim=True)
+        X_aug_2_pred_adapt = self.u_net(self.normalizer( 2 * X_aug_2 - 1)).argmax(dim=1, keepdim=True)
+
+        if loss_type == "data-consistency":
+            tensors = [X, mask, X_aug_1, X_aug_2, X_pred, X_aug_1_pred, X_aug_2_pred, X_pred_adapt,
+                       X_aug_1_pred_adapt, X_aug_2_pred_adapt]
+            titles = ["X", "mask", "aug_1", "aug_2", "X_pred", "aug_1_pred", "aug_2_pred", "X_pred_adapt",
+                      "aug_1_pred_adapt", "aug_2_pred_adapt"]
+
+        elif loss_type == "avg-entropy":
+            tensors = [X, mask, X_pred, X_pred_adapt]
+            titles = ["X", "mask", "X_pred", "X_pred_adapt"]
+
+        dir_path = os.path.join(self.param_save_dir, self.time_stamp)
+        filenames = [f"{dir_path}/{title}.png" for title in titles]
+        for tensor, title, filename in zip(tensors, titles, filenames):
+            self._make_and_save_fig_from_tensor(tensor, title, filename)
+
+        fig.savefig(f"{dir_path}/curve.png")
