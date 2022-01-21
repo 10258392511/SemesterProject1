@@ -64,7 +64,7 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
     X = (2 * X - 1).float().to(device)
 
     if mask is not None:
-        fig_orig = make_summary_plot_simplified(X, mask, normalizer, u_net, device=device)
+        fig_orig = make_summary_plot_simplified(X / 2 + 0.5, mask, normalizer, u_net, device=device)
 
     losses = []
     if mask is not None:
@@ -107,7 +107,7 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
 
     normalizer.eval()
     if mask is not None:
-        fig_adapted = make_summary_plot_simplified(X, mask, normalizer, u_net, device=device)
+        fig_adapted = make_summary_plot_simplified(X / 2 + 0.5, mask, normalizer, u_net, device=device)
 
     fig, axis = plt.subplots()
     axis.plot(losses, label="tta")

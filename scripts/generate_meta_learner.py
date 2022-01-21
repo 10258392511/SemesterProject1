@@ -44,7 +44,7 @@ if __name__ == '__main__':
     hyper_params = dict()
     # set 1
     hyper_params[1] = []
-    num_batches = [1, 2, 5, 10]
+    num_batches = [5]
     learner_steps = [1, 5, 10, 20]
     for num_batches_iter in num_batches:
         for learner_steps_iter in learner_steps:
