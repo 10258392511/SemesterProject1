@@ -69,8 +69,8 @@ if __name__ == '__main__':
     u_net_scheduler = LambdaLR(u_net_opt, lr_lambda)
 
     # train
-    time_stamp = f"{time.time()}_batches_{args.num_batches_to_sample}_learner_{args.num_learner_steps}_" \
-                 f"s_{args.lam_smooth:.4f}_pre_train_{args.pre_train_epochs}".replace(".", "_")
+    time_stamp = f"{time.time()}_learner_{args.num_learner_steps}_pre_train_{args.pre_train_epochs}_" \
+                 f"loss_{args.loss_type}".replace(".", "_")
     writer = SummaryWriter(f"run/norm_u_net/{time_stamp}")
     trainer_args = dict(test_dataset_dict=eval_dataset_3d_dict, normalizer_cp=norm_cp,
                         norm_opt_config=config.normalizer_optimizer_params,
