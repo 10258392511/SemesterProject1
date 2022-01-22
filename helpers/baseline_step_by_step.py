@@ -1241,13 +1241,12 @@ class MetaLearner(BasicTrainer):
         # norm, u_net: GPU
         assert loss_type in ["data-consistency", "avg-entropy"]
         self._create_save_dir()
+        if self.notebook:
+            from tqdm.notebook import trange
+        else:
+            from tqdm import trange
 
         if norm is None or u_net is None:
-            if self.notebook:
-                from tqdm.notebook import trange
-            else:
-                from tqdm import trange
-
             # self._create_save_dir()
             # lowest_loss = float("inf")
 
@@ -1283,7 +1282,8 @@ class MetaLearner(BasicTrainer):
         learner_losses = []  # (B * num_learner_steps,)
         xticks = []
 
-        for i in range(self.num_learner_steps):
+        pbar = trange(self.num_learner_steps, desc="adaptation")
+        for i in pbar:
             if loss_type == "data-consistency":
                 loss_unsup = self._compute_normalizer_loss(X_aug_1, X_aug_2)
             elif loss_type == "avg-entropy":
@@ -1294,6 +1294,8 @@ class MetaLearner(BasicTrainer):
             learner_losses.append(loss_unsup.item())
             # xticks.append(float(f"{b}.{i}"))
             xticks.append(i)
+
+            pbar.set_description(f"step {i + 1}/{self.num_learner_steps}: loss_unsup: {loss_unsup.item():.4f}")
 
         axis.plot(xticks, learner_losses)
         axis.grid(True)
