@@ -182,16 +182,18 @@ def evaluate_3d_adapt(X, mask, normalizer, u_net, norm_opt_config: dict, device=
     return loss
 
 
-def evaluate_3d_adapt_batch(X, mask, normalizer, u_net, norm_opt_config: dict, device=None,
+def evaluate_3d_adapt_batch(X, mask, normalizer, u_net, norm_opt_config: dict, device=None, normalizer_cp=None,
                             max_iters=10, batch_size=4):
-    # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]; normalizer should be a copy
+    # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]
     u_net.eval()
-    normalizer.train()
+    normalizer_cp.load_state_dict(normalizer.state_dict())
+    normalizer_cp.eval()
+    normalizer_cp.train()
     X = X[0].unsqueeze(1)  # (D, 1, H, W)
     mask = mask[0].unsqueeze(1)
-    norm_opt = torch.optim.Adam(normalizer.parameters(), **norm_opt_config)
+    norm_opt = torch.optim.Adam(normalizer_cp.parameters(), **norm_opt_config)
     # (B, K, H, W)
-    X_pred, _, = test_time_adaptation(X, None, normalizer, u_net, norm_opt, batch_size,
+    X_pred, _, = test_time_adaptation(X, None, normalizer_cp, u_net, norm_opt, batch_size,
                                            device=device, max_iters=max_iters)
 
     normalizer.eval()
@@ -1130,9 +1132,9 @@ class MetaLearner(BasicTrainer):
                     self.normalizer_cp.load_state_dict(self.normalizer.state_dict())
                     self.normalizer_cp.eval()
                     dataset = self.test_dataset_dict[key]
-                    loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer_cp, self.u_net,
+                    loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer, self.u_net,
                                                self.device, self.notebook, norm_opt_config=self.norm_opt_config,
-                                               max_iters=self.num_learner_steps)
+                                               max_iters=self.num_learner_steps, normalizer_cp=self.normalizer_cp)
                     losses_eval_3d[key] = loss
 
                 for key in losses_eval_3d:
@@ -1162,7 +1164,7 @@ class MetaLearner(BasicTrainer):
             self.global_steps["epoch"] += 1
             self.writer.flush()
 
-    # def _compute_normalizer_loss_old(self, X):
+    # def _compute_normalizer_loss(self, X):
     #     # X: (B, 1, H, W)
     #     # original implementation
     #     X_aug = random_contrast_transform(X)
