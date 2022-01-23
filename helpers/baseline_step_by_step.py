@@ -1239,6 +1239,50 @@ class MetaLearner(BasicTrainer):
         fig.savefig(filename)
         plt.close()
 
+    @torch.no_grad()
+    def _make_and_save_fig_compare_version(self, tensor_dict: dict, loss_type="data-consistency", **kwargs):
+        """
+        Plot for one image.
+        tensor_dict: {"filename": {"tensor(also title)": (1, 1, H, W)...}}
+        """
+        assert loss_type in ["data-consistency", "avg-entropy"]
+
+        for filename, tensors in tensor_dict.items():
+            break
+
+        fraction = kwargs.get("fraction", 0.5)
+
+        if loss_type == "data-consistency":
+            figsize = kwargs.get("figsize", (16, 10.8))
+            fig, axes = plt.subplots(3, 4, figsize=figsize)
+            keys = [[None, "X_da", "X_dac_1", "X_dac_2"],
+                    ["S_gt", "X_da_pred", "X_dac_1_pred", "X_dac_2_pred"],
+                    ["S_gt", "X_da_pred_adapt", "X_dac_1_pred_adapt", "X_dac_2_pred_adapt"]]
+
+        elif loss_type == "avg-entropy":
+            figsize = kwargs.get("figsize", (8, 10.8))
+            fig, axes = plt.subplots(3, 2, figsize=figsize)
+            keys = [[None, "X_da"],
+                    ["S_gt", "X_da_pred"],
+                    ["S_gt", "X_da_pred_adapt"]]
+
+        for r in range(axes.shape[0]):
+            for c in range(axes.shape[1]):
+                key = keys[r][c]
+                if key is None:
+                    axes[r, c].remove()
+                else:
+                    tensor = tensors[key]  # (1, 1, H, W)
+                    handle = axes[r, c].imshow(tensor.detach().cpu().numpy()[0, 0], cmap="gray")
+                    plt.colorbar(handle, ax=axes[r, c], fraction=fraction)
+                    axes[r, c].set_title(key)
+
+        fig.suptitle(os.path.basename(filename))
+        fig.tight_layout()
+
+        fig.savefig(filename)
+        plt.close()
+
     def meta_train_vis(self, loss_type="data-consistency", norm=None, u_net=None):
         # norm, u_net: GPU
         assert loss_type in ["data-consistency", "avg-entropy"]
@@ -1263,8 +1307,12 @@ class MetaLearner(BasicTrainer):
             self._save_params(self.pretrain_epochs, pre_train_eval_avg)
 
         else:
-            self.normalizer.load_state_dict(norm.state_dict())
-            self.u_net.load_state_dict(u_net.state_dict())
+            # # reset optimizer!
+            # self.normalizer.load_state_dict(norm.state_dict())
+            # self.u_net.load_state_dict(u_net.state_dict())
+            # self.normalizer.eval()
+            # self.u_net.eval()
+            pass
 
         X, mask = sample_from_loader(self.train_loader)  # (B, 1, H, W)
         X_aug_1, X_aug_2 = random_contrast_transform(X), random_contrast_transform(X)
@@ -1309,19 +1357,39 @@ class MetaLearner(BasicTrainer):
         X_aug_1_pred_adapt = self.u_net(self.normalizer(2 * X_aug_1 - 1)).argmax(dim=1, keepdim=True)
         X_aug_2_pred_adapt = self.u_net(self.normalizer( 2 * X_aug_2 - 1)).argmax(dim=1, keepdim=True)
 
-        if loss_type == "data-consistency":
-            tensors = [X, mask, X_aug_1, X_aug_2, X_pred, X_aug_1_pred, X_aug_2_pred, X_pred_adapt,
-                       X_aug_1_pred_adapt, X_aug_2_pred_adapt]
-            titles = ["X", "mask", "aug_1", "aug_2", "X_pred", "aug_1_pred", "aug_2_pred", "X_pred_adapt",
-                      "aug_1_pred_adapt", "aug_2_pred_adapt"]
-
-        elif loss_type == "avg-entropy":
-            tensors = [X, mask, X_pred, X_pred_adapt]
-            titles = ["X", "mask", "X_pred", "X_pred_adapt"]
+        # # ._make_and_save_fig_from_tensor(...)
+        # if loss_type == "data-consistency":
+        #     tensors = [X, mask, X_aug_1, X_aug_2, X_pred, X_aug_1_pred, X_aug_2_pred, X_pred_adapt,
+        #                X_aug_1_pred_adapt, X_aug_2_pred_adapt]
+        #     titles = ["X", "mask", "aug_1", "aug_2", "X_pred", "aug_1_pred", "aug_2_pred", "X_pred_adapt",
+        #               "aug_1_pred_adapt", "aug_2_pred_adapt"]
+        #
+        # elif loss_type == "avg-entropy":
+        #     tensors = [X, mask, X_pred, X_pred_adapt]
+        #     titles = ["X", "mask", "X_pred", "X_pred_adapt"]
+        #
+        # dir_path = os.path.join(self.param_save_dir, self.time_stamp)
+        # filenames = [f"{dir_path}/{title}.png" for title in titles]
+        # for tensor, title, filename in zip(tensors, titles, filenames):
+        #     self._make_and_save_fig_from_tensor(tensor, title, filename)
 
         dir_path = os.path.join(self.param_save_dir, self.time_stamp)
-        filenames = [f"{dir_path}/{title}.png" for title in titles]
-        for tensor, title, filename in zip(tensors, titles, filenames):
-            self._make_and_save_fig_from_tensor(tensor, title, filename)
-
         fig.savefig(f"{dir_path}/curve.png")
+
+        batch_size = X.shape[0]
+        for b in range(batch_size):
+            filename = f"{dir_path}/sample_{b + 1}.png"
+            if loss_type == "data-consistency":
+                tensor_dict = {filename: {"X_da": X[b:b + 1, ...], "X_dac_1": X_aug_1[b:b + 1, ...],
+                                          "X_dac_2": X_aug_2[b:b + 1, ...], "S_gt": mask[b:b + 1, ...],
+                                          "X_da_pred": X_pred[b:b + 1, ...], "X_dac_1_pred": X_aug_1_pred[b:b + 1, ...],
+                                          "X_dac_2_pred": X_aug_2_pred[b:b + 1, ...],
+                                          "X_da_pred_adapt": X_pred_adapt[b:b + 1, ...],
+                                          "X_dac_1_pred_adapt": X_aug_1_pred_adapt[b:b + 1, ...],
+                                          "X_dac_2_pred_adapt": X_aug_2_pred_adapt[b:b + 1, ...]}}
+            elif loss_type == "avg-entropy":
+                tensor_dict = {filename: {"X_da": X[b:b + 1, ...], "S_gt": mask[b:b + 1, ...],
+                                          "X_da_pred": X_pred[b:b + 1, ...],
+                                          "X_da_pred_adapt": X_pred_adapt[b:b + 1, ...]}}
+
+            self._make_and_save_fig_compare_version(tensor_dict, loss_type)
