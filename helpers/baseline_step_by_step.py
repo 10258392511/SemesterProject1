@@ -124,7 +124,7 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
                 dice_losses.append(dice_loss(u_net(normalizer(X)), mask).item())
 
         num_steps += 1
-        print(f"current: {num_steps}/{max_iters}, loss: {cur_loss}")
+        # print(f"current: {num_steps}/{max_iters}, loss: {cur_loss}")
         if num_steps > max_iters:
             break
 
