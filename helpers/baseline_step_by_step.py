@@ -62,7 +62,7 @@ def compute_norm_loss_and_update(data_loader, normalizer, u_net, norm_opt,  loss
 
 
 def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
-                         loss_fn=None, device=None, diff_rel=1e-4, max_iters=10):
+                         loss_fn=None, device=None, diff_rel=1e-8, max_iters=10):
     # X, mask: (B, 1, H, W) each, cpu, [0, 1]; normalizer: bottleneck; "mask" can be None
     if loss_fn is None:
         loss_fn = lambda X, mask: 0.5 * dice_loss(X, mask) + 0.5 * cross_entropy_loss(X, mask)
@@ -124,7 +124,7 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
                 dice_losses.append(dice_loss(u_net(normalizer(X)), mask).item())
 
         num_steps += 1
-        # print(f"current: {num_steps}/{max_iters}")
+        # print(f"current: {num_steps}/{max_iters}, loss: {cur_loss}")
         if num_steps > max_iters:
             break
 
@@ -149,55 +149,67 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
     return X_pred.detach().cpu(), fig
 
 
-def evaluate_3d_adapt(X, mask, normalizer, u_net, norm_opt_config: dict, device=None, normalizer_cp=None,
-                      out_channels=4, max_iters=10, batch_size=1):
-    # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]; normalizer should be a copy
-    u_net.eval()
-    normalizer_cp.eval()
-
-    local_dataset = TensorDataset(X[0], mask[0])  # (D, H, W)
-    local_dataloader = DataLoader(local_dataset, batch_size=batch_size)
-
-    loss_orig = evaluate_3d_no_adapt(X, mask, normalizer_cp, u_net, device=device)
-    print(f"loss_orig: {loss_orig}")
-    D, H, W = X.shape[1:]
-    X_preds = torch.empty(D, out_channels, H, W)
-
-    for d, (X_cur, mask_cur) in enumerate(local_dataloader):
-        print(f"current d: {d + 1}/{D}")
-        # print(f"{X_cur.shape}, {mask_cur.shape}")
-        normalizer.load_state_dict(normalizer_cp.state_dict())
-        normalizer.train()
-        norm_opt = torch.optim.Adam(normalizer.parameters(), **norm_opt_config)
-        # X_cur, mask_cur = X[:, d:d + 1, ...], mask[:, d:d + 1, ...]
-        X_cur, mask_cur = X_cur.unsqueeze(0), mask_cur.unsqueeze(0)  # (1, 1, H, W)
-        X_pred, _, _, _ = test_time_adaptation(X_cur, mask_cur, normalizer, u_net, norm_opt, batch_size,
-                                               device=device, max_iters=max_iters)  # (1, K, H, W)
-        X_preds[d, ...] = X_pred
-
-    normalizer.eval()
-    loss = dice_loss_3d(X_preds.to(device), mask[0].to(device)).item()
-    del X_preds
-
-    return loss
+# def evaluate_3d_adapt(X, mask, normalizer, u_net, norm_opt_config: dict, device=None, normalizer_cp=None,
+#                       out_channels=4, max_iters=10, batch_size=1):
+#     # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]; normalizer should be a copy
+#     u_net.eval()
+#     normalizer_cp.eval()
+#
+#     local_dataset = TensorDataset(X[0], mask[0])  # (D, H, W)
+#     local_dataloader = DataLoader(local_dataset, batch_size=batch_size)
+#
+#     loss_orig = evaluate_3d_no_adapt(X, mask, normalizer_cp, u_net, device=device)
+#     print(f"loss_orig: {loss_orig}")
+#     D, H, W = X.shape[1:]
+#     X_preds = torch.empty(D, out_channels, H, W)
+#
+#     for d, (X_cur, mask_cur) in enumerate(local_dataloader):
+#         print(f"current d: {d + 1}/{D}")
+#         # print(f"{X_cur.shape}, {mask_cur.shape}")
+#         normalizer.load_state_dict(normalizer_cp.state_dict())
+#         normalizer.train()
+#         norm_opt = torch.optim.Adam(normalizer.parameters(), **norm_opt_config)
+#         # X_cur, mask_cur = X[:, d:d + 1, ...], mask[:, d:d + 1, ...]
+#         X_cur, mask_cur = X_cur.unsqueeze(0), mask_cur.unsqueeze(0)  # (1, 1, H, W)
+#         X_pred, _, _, _ = test_time_adaptation(X_cur, mask_cur, normalizer, u_net, norm_opt, batch_size,
+#                                                device=device, max_iters=max_iters)  # (1, K, H, W)
+#         X_preds[d, ...] = X_pred
+#
+#     normalizer.eval()
+#     loss = dice_loss_3d(X_preds.to(device), mask[0].to(device)).item()
+#     del X_preds
+#
+#     return loss
 
 
 def evaluate_3d_adapt_batch(X, mask, normalizer, u_net, norm_opt_config: dict, device=None, normalizer_cp=None,
-                            max_iters=10, batch_size=4):
+                            max_iters=10, batch_size=6):
     # X, mask: (1, D, H, W), (1, D, H, W), X: [0, 1]
     u_net.eval()
+    normalizer.eval()
     normalizer_cp.load_state_dict(normalizer.state_dict())
     normalizer_cp.eval()
-    normalizer_cp.train()
+    # normalizer_cp.train()
+
     X = X[0].unsqueeze(1)  # (D, 1, H, W)
     mask = mask[0].unsqueeze(1)
+    # print(f"initial loss: {dice_loss_3d((u_net(normalizer(X.to(device))).detach().cpu()), mask[:, 0, ...])}")
     norm_opt = torch.optim.Adam(normalizer_cp.parameters(), **norm_opt_config)
     # (B, K, H, W)
     X_pred, _, = test_time_adaptation(X, None, normalizer_cp, u_net, norm_opt, batch_size,
                                            device=device, max_iters=max_iters)
 
-    normalizer.eval()
-    loss = dice_loss_3d(X_pred, mask[:, 0, ...]).item()
+    normalizer_cp.eval()
+    # print(mask[:, 0, ...].shape)
+    with torch.no_grad():
+        loss = dice_loss_3d(X_pred, mask[:, 0, ...]).item()
+
+    # X_pred_argmax = X_pred.argmax(dim=1)  # (D, H, W)
+    # for i in range(X_pred_argmax.shape[0]):
+    #     plt.imshow(X_pred_argmax[i], cmap="gray")
+    #     plt.colorbar()
+    #     plt.show()
+
     del X_pred
 
     return loss
@@ -1129,8 +1141,8 @@ class MetaLearner(BasicTrainer):
 
                 losses_eval_3d = {}
                 for key in self.test_dataset_dict:
-                    self.normalizer_cp.load_state_dict(self.normalizer.state_dict())
-                    self.normalizer_cp.eval()
+                    # self.normalizer_cp.load_state_dict(self.normalizer.state_dict())
+                    # self.normalizer_cp.eval()
                     dataset = self.test_dataset_dict[key]
                     loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer, self.u_net,
                                                self.device, self.notebook, norm_opt_config=self.norm_opt_config,

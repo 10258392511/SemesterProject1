@@ -54,10 +54,10 @@ if __name__ == '__main__':
     # set 2: extra
     hyper_params[2] = []
     # hyper_params[2] = [{"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": 10}]
-    learner_steps = [1, 10, 20, 50]
+    learner_steps = [50]
     for learner_steps_iter in learner_steps:
         hyper_params[2].append({"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": learner_steps_iter,
-                                "pre_train_epochs": 5})
+                                "pre_train_epochs": 0})
 
     hyper_params_list = hyper_params[args.set_num]
     for hyper_param_dict_iter in hyper_params_list:
