@@ -124,7 +124,7 @@ def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
                 dice_losses.append(dice_loss(u_net(normalizer(X)), mask).item())
 
         num_steps += 1
-        # print(f"current: {num_steps}/{max_iters}, loss: {cur_loss}")
+        print(f"current: {num_steps}/{max_iters}, loss: {cur_loss}")
         if num_steps > max_iters:
             break
 
@@ -1221,8 +1221,15 @@ class MetaLearner(BasicTrainer):
         # loss_unsup = self._compute_normalizer_loss(X_orig)
         #
         # return loss_fn(X_norm_pred, mask) + self.weights["lam_smooth"] * loss_unsup
+        X_aug_1 = random_contrast_transform(X_orig)
+        X_aug_2 = random_contrast_transform(X_orig)
+        X_aug_1 = 2 * X_aug_1 - 1
+        X_aug_2 = 2 * X_aug_2 - 1
+        X_aug_1_pred = self.u_net(self.normalizer(X_aug_1))
+        X_aug_2_pred = self.u_net(self.normalizer(X_aug_2))
+        loss_unsup = symmetric_loss(X_aug_1_pred, X_aug_2_pred, loss_fn)
 
-        return loss_fn(X_norm_pred, mask)
+        return loss_fn(X_norm_pred, mask) + self.weights["lam_smooth"] * loss_unsup
 
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))

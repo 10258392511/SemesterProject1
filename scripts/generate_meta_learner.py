@@ -56,7 +56,7 @@ if __name__ == '__main__':
     # hyper_params[2] = [{"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": 10}]
     learner_steps = [50]
     for learner_steps_iter in learner_steps:
-        hyper_params[2].append({"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": learner_steps_iter,
+        hyper_params[2].append({"lam_smooth": 0.01, "num_batches_to_sample": 1, "num_learner_steps": learner_steps_iter,
                                 "pre_train_epochs": 0})
 
     hyper_params_list = hyper_params[args.set_num]
