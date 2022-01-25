@@ -43,20 +43,27 @@ if __name__ == '__main__':
     args = parser.parse_args()
     hyper_params = dict()
     # set 1
+    # hyper_params[1] = []
+    # num_batches = [5]
+    # learner_steps = [1, 5, 10, 20]
+    # for num_batches_iter in num_batches:
+    #     for learner_steps_iter in learner_steps:
+    #         hyper_params[1].append({"lam_smooth": 0.01, "num_batches_to_sample": num_batches_iter,
+    #                                 "num_learner_steps": learner_steps_iter, "pre_train_epochs": 5})
+
     hyper_params[1] = []
-    num_batches = [5]
-    learner_steps = [1, 5, 10, 20]
-    for num_batches_iter in num_batches:
-        for learner_steps_iter in learner_steps:
-            hyper_params[1].append({"lam_smooth": 0.01, "num_batches_to_sample": num_batches_iter,
-                                    "num_learner_steps": learner_steps_iter, "pre_train_epochs": 5})
+    # hyper_params[2] = [{"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": 10}]
+    learner_steps = [1, 10, 20, 50]
+    for learner_steps_iter in learner_steps:
+        hyper_params[1].append({"lam_smooth": 0.01, "num_batches_to_sample": 1, "num_learner_steps": learner_steps_iter,
+                                "pre_train_epochs": 5})
 
     # set 2: extra
     hyper_params[2] = []
     # hyper_params[2] = [{"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": 10}]
-    learner_steps = [50]
+    learner_steps = [20, 50]
     for learner_steps_iter in learner_steps:
-        hyper_params[2].append({"lam_smooth": 0.01, "num_batches_to_sample": 1, "num_learner_steps": learner_steps_iter,
+        hyper_params[2].append({"lam_smooth": 0., "num_batches_to_sample": 1, "num_learner_steps": learner_steps_iter,
                                 "pre_train_epochs": 5})
 
     hyper_params_list = hyper_params[args.set_num]

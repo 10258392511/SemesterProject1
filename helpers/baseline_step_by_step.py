@@ -62,7 +62,7 @@ def compute_norm_loss_and_update(data_loader, normalizer, u_net, norm_opt,  loss
 
 
 def test_time_adaptation(X, mask, normalizer, u_net, norm_opt, batch_size,
-                         loss_fn=None, device=None, diff_rel=1e-8, max_iters=10):
+                         loss_fn=None, device=None, diff_rel=1e-4, max_iters=10):
     # X, mask: (B, 1, H, W) each, cpu, [0, 1]; normalizer: bottleneck; "mask" can be None
     if loss_fn is None:
         loss_fn = lambda X, mask: 0.5 * dice_loss(X, mask) + 0.5 * cross_entropy_loss(X, mask)

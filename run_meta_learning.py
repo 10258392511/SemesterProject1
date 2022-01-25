@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size", type=int, default=6)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--total_steps", type=int, default=10000)
-    parser.add_argument("--eval_interval", type=int, default=100)
+    parser.add_argument("--eval_interval", type=int, default=500)
 
     parser.add_argument("--lam_smooth", type=float, required=True)
     parser.add_argument("--num_batches_to_sample", type=int, required=True)
