@@ -345,3 +345,48 @@ def sample_from_loader(loader):
         break
 
     return X, mask
+
+
+# @torch.no_grad()
+# def augmentation_by_normalizer(X, normalizer_list, device=None):
+#     # X: (B, 1, H, W), [0, 1]; normalizer: bottleneck, default: k = 5
+#     device = torch.device("cuda") if device is None else device
+#     normalizer = normalizer_list[np.random.randint(0, len(normalizer_list))]
+#     print(normalizer.kernel_size)
+#     X = 2 * X.to(device) - 1
+#     normalizer.eval()
+#     X_norm = normalizer(X)
+#     X_aug = normalizer(X) - X
+#     p = (torch.rand((X.shape[0], 1, 1, 1)).to(device) >= 0.5)
+#     p = 2 * p - 1
+#     # print(p)
+#     X_aug *= p
+#     X_norm *= p
+#
+#     return X_norm, X_aug
+
+
+@torch.no_grad()
+def augmentation_by_normalizer(X, normalizer_list, device=None, if_debug=False):
+    # X: (B, 1, H, W), [0, 1]; normalizer: bottleneck, default: k = 5
+    device = torch.device("cuda") if device is None else device
+    ind1, ind2 = np.random.choice(len(normalizer_list), (2,), replace=False)
+    normalizer1, normalizer2 = normalizer_list[ind1], normalizer_list[ind2]
+    # print(f"{normalizer1.kernel_size}, {normalizer2.kernel_size}")
+    X = 2 * X.to(device) - 1
+    normalizer1.eval()
+    normalizer2.eval()
+    X_norm1 = normalizer1(X)
+    X_norm2 = normalizer2(X)
+    X_diff = X_norm1 - X_norm2
+    p = (torch.rand((X.shape[0], 1, 1, 1)).to(device) >= 0.5)
+    p = 2 * p - 1
+    X_aug = X + X_diff
+    # print(p)
+    X_aug *= p
+    X_aug = normalize_tensor(X_aug)
+
+    if if_debug:
+        return X_diff, X_aug
+
+    return X_aug

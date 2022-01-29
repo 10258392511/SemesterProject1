@@ -12,6 +12,9 @@ from helpers.utils import get_separated_transforms
 from helpers.baseline_step_by_step import OnePassTrainer, AltTrainer
 
 if __name__ == '__main__':
+    """
+    python ./run_baseline_step_by_step.py --train_source_name "csf" --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 4 --num_workers 0 --epochs 2 --lam_ce 0.5 --lam_dsc 0.5 --lam_smooth 0.01 --aug_prob 0.5 --if_augment --if_att
+    """
     parser = argparse.ArgumentParser()
     parser.add_argument("--if_augment", action="store_true")
     parser.add_argument("--device", default="cuda")
@@ -64,12 +67,14 @@ if __name__ == '__main__':
     norm = Normalizer(**config.normalizer_params).to(DEVICE)
     u_net_opt = torch.optim.Adam(u_net.parameters(), **config.u_net_optimzer_params)
     norm_opt = torch.optim.Adam(norm.parameters(), **config.normalizer_optimizer_params)
+    kernel_sizes = [2 * i + 1 for i in range(10)]
+    augmentors = [Normalizer(kernel_size=kernel_size).to(DEVICE) for kernel_size in kernel_sizes]
 
     weights = dict(lam_ce=args.lam_ce, lam_dsc=args.lam_dsc, lam_smooth=args.lam_smooth)
     time_stamp = f"{time.time()}_ce_{weights['lam_ce']}_dsc_{weights['lam_dsc']}_s_{weights['lam_smooth']}_alt_" \
                  f"{args.if_alt}_aug_{args.if_augment}_att_{args.if_att}_aug_prob_{args.aug_prob}".replace(".", "_")
     writer = SummaryWriter(f"run/norm_u_net/{time_stamp}")
-    trainer_args = dict(test_dataset_dict=test_dataset_dict, normalizer=norm, u_net=u_net,
+    trainer_args = dict(test_dataset_dict=test_dataset_dict, normalizer=norm, u_net=u_net, normalizer_list=augmentors,
                         norm_opt=norm_opt, u_net_opt=u_net_opt, epochs=args.epochs, num_classes=4,
                         weights=weights, notebook=False, writer=writer, param_save_dir="params/norm_u_net",
                         time_stamp=time_stamp, device=DEVICE, **train_loader_dict)

@@ -7,7 +7,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from torchvision.utils import make_grid
 from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
-from .utils import random_gamma_transform, sample_from_loader, random_contrast_transform
+from .utils import random_gamma_transform, sample_from_loader, random_contrast_transform, augmentation_by_normalizer
 
 
 @torch.no_grad()
@@ -442,10 +442,10 @@ class BasicTrainer(object):
     def _end_epoch_plot(self):
         ind = np.random.randint(len(self.test_loader.dataset))
         X, mask = self.test_loader.dataset[ind]  # (1, H, W), (1, H, W)
-        # fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
-        #                                    if_show=self.notebook, device=self.device)
-        fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
-                                       if_show=self.notebook, device=self.device)
+        fig = make_summary_plot_simplified(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+                                           if_show=self.notebook, device=self.device)
+        # fig = make_summary_plot_2_by_2(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
+        #                                if_show=self.notebook, device=self.device)
         # fig = make_summary_plot_1_by_3(X.unsqueeze(0), mask.unsqueeze(0), self.normalizer, self.u_net,
         #                                if_show=self.notebook, device=self.device)
         return fig
@@ -467,9 +467,10 @@ class BasicTrainer(object):
 
 
 class OnePassTrainer(BasicTrainer):
-    def __init__(self, test_dataset_dict, **kwargs):
+    def __init__(self, test_dataset_dict, normalizer_list, **kwargs):
         super(OnePassTrainer, self).__init__(**kwargs)
         self.test_dataset_dict = test_dataset_dict  # {"csf": ..., "hvhd": ..., "uhe": ...}
+        self.normalizer_list = normalizer_list
 
     def _train(self, **kwargs):
         self.normalizer.train()
@@ -612,7 +613,9 @@ class OnePassTrainer(BasicTrainer):
         # full normalizer
         # X, mask: (B, 1, H, W), (B, 1, H, W); already sent to self.device; X: [0, 1]
         B, C_in, H, W = X.shape
-        X_aug = random_gamma_transform(X)
+        # X_aug = random_gamma_transform(X)
+        X_aug = random_contrast_transform(X)
+        X_aug = augmentation_by_normalizer(X_aug, self.normalizer_list)
         X = 2 * X - 1
         X_aug = 2 * X_aug - 1
         X_norm = self.normalizer(X)  # (B, 1, H, W)
@@ -648,6 +651,7 @@ class OnePassTrainer(BasicTrainer):
         loss_fn = lambda X, mask: self.weights["lam_ce"] * cross_entropy_loss(X, mask) + \
                                   self.weights["lam_dsc"] * dice_loss(X, mask)
         loss_sup = loss_fn(mask_pred_direct, mask)
+        # loss_sup = loss_fn(mask_pred_direct, mask) * 1
         loss_unsup = self.weights["lam_smooth"] * symmetric_loss(mask_pred_direct, mask_pred_aug, loss_fn)
 
         return loss_sup, loss_unsup
