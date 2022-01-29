@@ -616,6 +616,7 @@ class OnePassTrainer(BasicTrainer):
         # X_aug = random_gamma_transform(X)
         X_aug = random_contrast_transform(X)
         X_aug = augmentation_by_normalizer(X_aug, self.normalizer_list)
+        X = augmentation_by_normalizer(X, self.normalizer_list)
         X = 2 * X - 1
         X_aug = 2 * X_aug - 1
         X_norm = self.normalizer(X)  # (B, 1, H, W)
