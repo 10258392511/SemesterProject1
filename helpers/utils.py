@@ -367,7 +367,7 @@ def sample_from_loader(loader):
 
 
 @torch.no_grad()
-def augmentation_by_normalizer(X, normalizer_list, device=None, if_debug=False):
+def augmentation_by_normalizer(X, normalizer_list, p_th=0.5, device=None, if_debug=False):
     # X: (B, 1, H, W), [0, 1]; normalizer: bottleneck, default: k = 5
     device = torch.device("cuda") if device is None else device
     ind1, ind2 = np.random.choice(len(normalizer_list), (2,), replace=False)
@@ -379,7 +379,7 @@ def augmentation_by_normalizer(X, normalizer_list, device=None, if_debug=False):
     X_norm1 = normalizer1(X)
     X_norm2 = normalizer2(X)
     X_diff = X_norm1 - X_norm2
-    p = (torch.rand((X.shape[0], 1, 1, 1)).to(device) >= 0.5)
+    p = (torch.rand((X.shape[0], 1, 1, 1)).to(device) >= p_th)
     p = 2 * p - 1
     X_aug = X + X_diff
     # print(p)

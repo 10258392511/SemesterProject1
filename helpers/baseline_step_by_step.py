@@ -571,7 +571,8 @@ class OnePassTrainer(BasicTrainer):
             self._train()
             loss_all_avg = self._eval()
             if self.scheduler is not None:
-                self.scheduler.step()
+                for scheduler_iter in self.scheduler:
+                    scheduler_iter.step()
 
             fig = self._end_epoch_plot()
             losses_eval_3d = {}
@@ -617,7 +618,8 @@ class OnePassTrainer(BasicTrainer):
         X_aug = random_contrast_transform(X)
         X_aug = augmentation_by_normalizer(X_aug, self.normalizer_list)
         X = random_contrast_transform(X)
-        X = augmentation_by_normalizer(X, self.normalizer_list)
+        p_th = 0.5
+        X = augmentation_by_normalizer(X, self.normalizer_list, p_th=p_th)
         X = 2 * X - 1
         X_aug = 2 * X_aug - 1
         X_norm = self.normalizer(X)  # (B, 1, H, W)

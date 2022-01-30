@@ -4,6 +4,7 @@ import time
 import scripts.config as config
 
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LambdaLR
 from torch.utils.tensorboard import SummaryWriter
 from models.u_net import UNet
 from models.modules import Normalizer
@@ -70,6 +71,10 @@ if __name__ == '__main__':
     kernel_sizes = [2 * i + 1 for i in range(10)]
     augmentors = [Normalizer(kernel_size=kernel_size).to(DEVICE) for kernel_size in kernel_sizes]
 
+    lr_lambda = lambda epoch: 1 - epoch / args.epochs * (1 - config.scheduler_params["min_lr"] /
+                                                    config.scheduler_params["max_lr"])
+    u_net_scheduler = LambdaLR(u_net_opt, lr_lambda)
+
     weights = dict(lam_ce=args.lam_ce, lam_dsc=args.lam_dsc, lam_smooth=args.lam_smooth)
     time_stamp = f"{time.time()}_ce_{weights['lam_ce']}_dsc_{weights['lam_dsc']}_s_{weights['lam_smooth']}_alt_" \
                  f"{args.if_alt}_aug_{args.if_augment}_att_{args.if_att}_aug_prob_{args.aug_prob}".replace(".", "_")
@@ -77,7 +82,7 @@ if __name__ == '__main__':
     trainer_args = dict(test_dataset_dict=test_dataset_dict, normalizer=norm, u_net=u_net, normalizer_list=augmentors,
                         norm_opt=norm_opt, u_net_opt=u_net_opt, epochs=args.epochs, num_classes=4,
                         weights=weights, notebook=False, writer=writer, param_save_dir="params/norm_u_net",
-                        time_stamp=time_stamp, device=DEVICE, **train_loader_dict)
+                        time_stamp=time_stamp, device=DEVICE, scheduler=[u_net_scheduler], **train_loader_dict)
     if args.if_alt:
         trainer = AltTrainer(**trainer_args)
     else:
