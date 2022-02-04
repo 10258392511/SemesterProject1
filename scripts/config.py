@@ -1,5 +1,5 @@
 # Schedulers
-scheduler_params = dict(max_lr=2e-4, min_lr=1e-5)
+scheduler_params = dict(max_lr=1e-3, min_lr=1e-4)
 
 # U-Net
 # u_net_params = dict(num_down_blocks=4, target_channels=4, in_channels=1, attention=False)

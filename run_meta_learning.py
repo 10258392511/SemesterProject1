@@ -13,7 +13,7 @@ from helpers.baseline_step_by_step import MetaLearner
 
 if __name__ == '__main__':
     """
-    python ./run_meta_learning.py --train_source_name "csf" --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 2 --num_workers 0 --lam_smooth 0 --num_batches_to_sample 1 --num_learner_steps 10 --pre_train_epochs 10
+    python ./run_meta_learning.py --train_source_name "csf" --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 2 --num_workers 0 --lam_smooth 0.01 --num_batches_to_sample 1 --num_learner_steps 10 --pre_train_epochs 2
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda")
@@ -63,6 +63,9 @@ if __name__ == '__main__':
     norm_opt = torch.optim.Adam(norm.parameters(), **config.normalizer_optimizer_params)
     norm_cp = Normalizer(**config.normalizer_params).to(DEVICE)
 
+    kernel_sizes = [2 * i + 1 for i in range(10)]
+    augmentors = [Normalizer(kernel_size=kernel_size).to(DEVICE) for kernel_size in kernel_sizes]
+
     lr_lambda = lambda epoch: 1 - epoch / epochs * (1 - config.scheduler_params["min_lr"] /
                                                     config.scheduler_params["max_lr"])
     u_net_scheduler = LambdaLR(u_net_opt, lr_lambda)
@@ -71,7 +74,7 @@ if __name__ == '__main__':
     time_stamp = f"{time.time()}_batches_{args.num_batches_to_sample}_learner_{args.num_learner_steps}_" \
                  f"s_{args.lam_smooth:.4f}_pre_train_{args.pre_train_epochs}".replace(".", "_")
     writer = SummaryWriter(f"run/norm_u_net/{time_stamp}")
-    trainer_args = dict(test_dataset_dict=eval_dataset_3d_dict, normalizer_cp=norm_cp,
+    trainer_args = dict(test_dataset_dict=eval_dataset_3d_dict, normalizer_cp=norm_cp, normalizer_list=augmentors,
                         norm_opt_config=config.normalizer_optimizer_params,
                         num_batches_to_sample=args.num_batches_to_sample, num_learner_steps=args.num_learner_steps,
                         total_steps=args.total_steps, pre_train_epochs=args.pre_train_epochs,
