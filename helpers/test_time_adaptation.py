@@ -7,6 +7,14 @@ from .losses import dice_loss_3d, dice_loss, cross_entropy_loss, symmetric_loss
 from .utils import random_contrast_transform, augmentation_by_normalizer
 
 
+def data_aug(X, normalizer_list, device):
+    # X: (B, 1, H, W), [0, 1]
+    X = random_contrast_transform(X)
+    # X = augmentation_by_normalizer(X, normalizer_list, device=device)
+
+    return X.float()
+
+
 def average_model(normalizer, normalizer_cps):
     state_dict = normalizer.state_dict()
     for key in state_dict:
@@ -27,13 +35,13 @@ def update_normalizer(data_loader, normalizer, u_net, normalizer_cps, norm_opt_c
     or eval) outside the scope
     """
     for X in data_loader:
-        for normalizer_cp, norm_opt_cp in normalizer_cps, norm_opt_cps:
+        X = X[0]
+        X = X.to(device)
+        for normalizer_cp, norm_opt_cp in zip(normalizer_cps, norm_opt_cps):
             normalizer_cp.load_state_dict(normalizer.state_dict())
 
-            X_aug1 = random_contrast_transform(X)
-            X_aug1 = augmentation_by_normalizer(X_aug1, normalizer_list, device=device)
-            X_aug2 = random_contrast_transform(X)
-            X_aug2 = augmentation_by_normalizer(X_aug2, normalizer_list, device=device)
+            X_aug1 = data_aug(X, normalizer_list, device)
+            X_aug2 = data_aug(X, normalizer_list, device)
             X_aug1 = X_aug1 * 2 - 1
             X_aug2 = X_aug2 * 2 - 1
             X_pred_1 = u_net(normalizer_cp(X_aug1))
@@ -61,10 +69,8 @@ def _compute_3D_loss(X, mask, u_net, normalizer):
 def _compute_tta_loss(X, mask, u_net, normalizer, loss_fn, normalizer_list, device):
     # X, mask: (D, 1, H, W), already sent to DEVICE
     normalizer.eval()
-    X_aug1 = random_contrast_transform(X)
-    X_aug1 = augmentation_by_normalizer(X_aug1, normalizer_list, device=device)
-    X_aug2 = random_contrast_transform(X)
-    X_aug2 = augmentation_by_normalizer(X_aug2, normalizer_list, device=device)
+    X_aug1 = data_aug(X, normalizer_list, device)
+    X_aug2 = data_aug(X, normalizer_list, device)
     X_aug1 = X_aug1 * 2 - 1
     X_aug2 = X_aug2 * 2 - 1
     X_pred_1 = u_net(normalizer(X_aug1))
@@ -75,6 +81,35 @@ def _compute_tta_loss(X, mask, u_net, normalizer, loss_fn, normalizer_list, devi
     return loss.item()
 
 
+@torch.no_grad()
+def make_prediction_plot(X, mask, normalizer, normalizer_cp, u_net, device, if_notebook=False, **kwargs):
+    normalizer.eval()
+    normalizer_cp.eval()
+    u_net.eval()
+    figsize = kwargs.get("figsize", (10.8, 2.4))
+    fraction = kwargs.get("fraction", 0.05)
+
+    X_pred_original = u_net(normalizer_cp(2 * X.to(device) - 1)).argmax(1)  # (D, K, H, W) -> (D, H, W)
+    X_pred_adapted = u_net(normalizer(2 * X.to(device) - 1)).argmax(1)
+
+    fig, axes = plt.subplots(X.shape[0], 4, figsize=(figsize[0], figsize[1] * X.shape[0]))
+    titles = ["X_orig", "gt", "X_pred_no_adapt", "X_pred_adapt"]
+    for i in range(X.shape[0]):
+        axes_iter = axes[i, :]
+        # X, mask: (D, 1, H, W)
+        imgs = [X[i, 0], mask[i, 0], X_pred_original[i], X_pred_adapted[i]]
+        for axis, img_iter, title in zip(axes_iter, imgs, titles):
+            handle = axis.imshow(img_iter.detach().cpu().numpy(), cmap="gray")
+            axis.set_title(title)
+            plt.colorbar(handle, ax=axis, fraction=fraction)
+    fig.tight_layout()
+    if if_notebook:
+        plt.show()
+    plt.close()
+
+    return fig
+
+
 def test_time_adaptation_avg(X, mask, normalizer, u_net, normalizer_cps, norm_opt_cps, normalizer_list,
                              batch_size, loss_fn=None, device=None, diff_rel=1e-4, max_iters=50, if_notebook=False):
     # X, mask: (D, 1, H, W); no need make a copy of normalizer
@@ -83,7 +118,7 @@ def test_time_adaptation_avg(X, mask, normalizer, u_net, normalizer_cps, norm_op
         loss_fn = lambda X, mask: 0.5 * cross_entropy_loss(X, mask) + 0.5 * dice_loss(X, mask)
     device = torch.device("cuda") if device is None else device
     u_net.eval()
-    normalizer_cps.train()
+    normalizer.train()
     for normalizer_cp in normalizer_cps:
         normalizer_cp.train()
     local_dataset = TensorDataset(X)
@@ -114,20 +149,22 @@ def test_time_adaptation_avg(X, mask, normalizer, u_net, normalizer_cps, norm_op
     fig, axis = plt.subplots()
     axis.plot(tta_losses, label="tta")
     axis.plot(dice_losses, label="dice loss")
+    axis.set_title(f"DICE loss: original: {dice_losses[0]}, adapted: {dice_losses[-1]}")
     axis.grid(True)
     axis.legend()
     if if_notebook:
         plt.show()
     plt.close()
 
-    return dice_losses[-1], fig
+    return dice_losses[0], dice_losses[-1], fig
 
 
 def evaluate_3D_adapt_avg(dataset_dict, normalizer, u_net, normalizer_cp, normalizer_cps, norm_opt_cps, normalizer_list,
-                          batch_size, loss_fn=None, device=None, diff_rel=1e-4, max_iters=50, if_notebook=True):
+                          batch_size, loss_fn=None, device=None, diff_rel=1e-4, max_iters=50, if_notebook=False):
     # dataset_dict: {"csf": ...}
     losses_out = {}
     figs_out = {}  # {"csf": [fig_vol0, fig_vol1, ...]}
+    figs_pred_out = {}
     if if_notebook:
         from tqdm.notebook import trange
     else:
@@ -136,21 +173,29 @@ def evaluate_3D_adapt_avg(dataset_dict, normalizer, u_net, normalizer_cp, normal
     for key in dataset_dict:
         dataset_iter = dataset_dict[key]
         fig_list = []
+        fig_pred_list = []
         loss_avg = 0
+        loss_start_avg = 0
         pbar = trange(len(dataset_iter), desc=f"{key}")
         for i in pbar:
             X, mask = dataset_iter[i]  # (1, D, H, W), (1, D, H, W)
             X = X.permute(1, 0, 2, 3)  # (D, 1, H, W)
             mask = mask.permute(1, 0, 2, 3)
             normalizer.load_state_dict(normalizer_cp.state_dict())
-            loss, fig = test_time_adaptation_avg(X, mask, normalizer, u_net, normalizer_cps, norm_opt_cps,
+            loss_start, loss, fig = test_time_adaptation_avg(X, mask, normalizer, u_net, normalizer_cps, norm_opt_cps,
                                                  normalizer_list, batch_size, loss_fn=loss_fn, device=device,
                                                  diff_rel=diff_rel, max_iters=max_iters, if_notebook=if_notebook)
             fig_list.append(fig)
+            loss_start_avg += loss_start
             loss_avg += loss
 
-        loss_avg /= len(dataset_iter)
-        losses_out[key] = loss_avg
-        figs_out[key] = fig_list
+            fig_pred = make_prediction_plot(X, mask, normalizer, normalizer_cp, u_net, device, if_notebook=if_notebook)
+            fig_pred_list.append(fig_pred)
 
-    return losses_out, figs_out
+        loss_start_avg /= len(dataset_iter)
+        loss_avg /= len(dataset_iter)
+        losses_out[key] = (loss_start_avg, loss_avg)
+        figs_out[key] = fig_list
+        figs_pred_out[key] = fig_pred_list
+
+    return losses_out, figs_out, figs_pred_out
