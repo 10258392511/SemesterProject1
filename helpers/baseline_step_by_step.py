@@ -1028,6 +1028,7 @@ class MetaLearner(BasicTrainer):
         for i, (X, mask) in pbar:
             # X: (B, 1, H, W)
             X = X.to(self.device)
+            X = augmentation_by_normalizer(X, self.normalizer_list)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
             self.norm_opt.zero_grad()
@@ -1251,7 +1252,9 @@ class MetaLearner(BasicTrainer):
         #
         # return loss_fn(X_norm_pred, mask) + self.weights["lam_smooth"] * loss_unsup
         X_aug_1 = random_contrast_transform(X_orig)
+        X_aug_1 = augmentation_by_normalizer(X_aug_1, self.normalizer_list)
         X_aug_2 = random_contrast_transform(X_orig)
+        X_aug_2 = augmentation_by_normalizer(X_aug_2, self.normalizer_list)
         X_aug_1 = 2 * X_aug_1 - 1
         X_aug_2 = 2 * X_aug_2 - 1
         X_aug_1_pred = self.u_net(self.normalizer(X_aug_1))
