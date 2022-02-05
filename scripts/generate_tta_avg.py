@@ -17,7 +17,7 @@ eval "$(conda shell.bash hook)"
 conda activate deep_learning
 cd ../SemesterProject1
 
-python run_tta_avg.py --device "cuda" --batch_size 6 --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --u_net_path f"{hyper_param_dict["u_net_path"]}" --norm_path f"{hyper_param_dict["norm_path"]}" """
+python run_tta_avg.py --device "cuda" --batch_size 6 --input_dir "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "/itet-stor/zhexwu/net_scratch/data/MnMs_extracted/MnMs_extracted_3d.h5" --u_net_path "{hyper_param_dict["u_net_path"]}" --norm_path "{hyper_param_dict["norm_path"]}" """
     return bash_script
 
 

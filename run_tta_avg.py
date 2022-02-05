@@ -24,22 +24,22 @@ def save_results(save_dir, dice_losses_dict, figs_curve, figs_pred):
     for key in figs_curve:
         assert key in figs_pred
         assert len(figs_curve[key]) == len(figs_pred[key])
-        for i in range(figs_curve[key]):
+        for i in range(len(figs_curve[key])):
             curve_path = os.path.join(save_dir, f"{key}_{i}_curve.png")
             pred_path = os.path.join(save_dir, f"{key}_{i}_pred.png")
-            figs_curve[i].savefig(curve_path)
-            figs_pred[i].savefig(pred_path)
+            figs_curve[key][i].savefig(curve_path)
+            figs_pred[key][i].savefig(pred_path)
 
 
 if __name__ == '__main__':
     """ 
-    python run_tta_avg.py --batch_size 2 --num_agents 5 --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --u_net_path "test_time_adapt_params/1643141863_9186742_batches_1_learner_20_s_0_0000_pre_train_5/u_net_epoch_9000_eval_loss_0_3041.pt" --norm_path "test_time_adapt_params/1643141863_9186742_batches_1_learner_20_s_0_0000_pre_train_5/norm_epoch_9000_eval_loss_0_3041.pt"
+    python run_tta_avg.py --batch_size 2 --num_agents 2 --max_iters 2 --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --u_net_path "test_time_adapt_params/1643141863_9186742_batches_1_learner_20_s_0_0000_pre_train_5/u_net_epoch_9000_eval_loss_0_3041.pt" --norm_path "test_time_adapt_params/1643141863_9186742_batches_1_learner_20_s_0_0000_pre_train_5/norm_epoch_9000_eval_loss_0_3041.pt"
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch_size", type=int, required=True)
-    parser.add_argument("--num_agents", type=int, default=30)
-    parser.add_argument("--lr", type=float, default=3e-1)
+    parser.add_argument("--num_agents", type=int, default=20)
+    parser.add_argument("--lr", type=float, default=1e-1)
     parser.add_argument("--max_iters", type=int, default=50)
     parser.add_argument("--u_net_path", required=True)
     parser.add_argument("--norm_path", required=True)
@@ -55,6 +55,7 @@ if __name__ == '__main__':
 
     # load data
     source_names = ["csf", "hvhd", "uhe"]
+    # source_names = ["csf"]
     data_path = args.input_dir
     data_path_test = args.input_dir_3d
     train_dataset_dict = {}
@@ -96,6 +97,6 @@ if __name__ == '__main__':
                                                                 batch_size=args.batch_size, max_iters=args.max_iters,
                                                                 device=DEVICE, if_notebook=False)
 
-    directory_name = os.path.basename(os.path.dirname(args.u_net))  # timestamp_config
+    directory_name = os.path.basename(os.path.dirname(args.u_net_path))  # timestamp_config
     save_dir = os.path.join(save_root_dir, directory_name)  # test_time_adapt_results/timestamp_config
     save_results(save_dir, losses_out, figs_out, figs_pred_out)

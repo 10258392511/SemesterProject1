@@ -178,6 +178,11 @@ def evaluate_3D_adapt_avg(dataset_dict, normalizer, u_net, normalizer_cp, normal
         loss_start_avg = 0
         pbar = trange(len(dataset_iter), desc=f"{key}")
         for i in pbar:
+            # ###
+            # # debug only
+            # if i >= 2:
+            #     break
+            # ###
             X, mask = dataset_iter[i]  # (1, D, H, W), (1, D, H, W)
             X = X.permute(1, 0, 2, 3)  # (D, 1, H, W)
             mask = mask.permute(1, 0, 2, 3)
