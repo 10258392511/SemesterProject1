@@ -149,7 +149,7 @@ def test_time_adaptation_avg(X, mask, normalizer, u_net, normalizer_cps, norm_op
     fig, axis = plt.subplots()
     axis.plot(tta_losses, label="tta")
     axis.plot(dice_losses, label="dice loss")
-    axis.set_title(f"DICE loss: original: {dice_losses[0]}, adapted: {dice_losses[-1]}")
+    axis.set_title(f"DICE loss: original: {dice_losses[0]:.4f}, adapted: {dice_losses[-1]:.4f}")
     axis.grid(True)
     axis.legend()
     if if_notebook:
