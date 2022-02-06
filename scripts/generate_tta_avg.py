@@ -50,8 +50,21 @@ if __name__ == '__main__':
                                                   "1643141863_9186742_batches_1_learner_20_s_0_0000_pre_train_5/norm_epoch_9000_eval_loss_0_3041.pt")}
                        ]
 
-    # set 2: extra
-    hyper_params[2] = []
+    # set 2
+    dir_root = "test_time_adapt_params"
+    hyper_params[2] = [{"u_net_path": os.path.join(dir_root,
+                                                   "1643964795_142379_batches_1_learner_10_s_0_0100_pre_train_5/u_net_epoch_9500_eval_loss_0_2680.pt"),
+                        "norm_path": os.path.join(dir_root,
+                                                  "1643964795_142379_batches_1_learner_10_s_0_0100_pre_train_5/norm_epoch_9500_eval_loss_0_2680.pt")},
+                       {"u_net_path": os.path.join(dir_root,
+                                                   "1643964795_1180596_batches_1_learner_1_s_0_0100_pre_train_5/u_net_epoch_8500_eval_loss_0_3147.pt"),
+                        "norm_path": os.path.join(dir_root,
+                                                  "1643964795_1180596_batches_1_learner_1_s_0_0100_pre_train_5/norm_epoch_8500_eval_loss_0_3147.pt")},
+                       {"u_net_path": os.path.join(dir_root,
+                                                   "1643964797_0763805_batches_1_learner_20_s_0_0100_pre_train_5/u_net_epoch_9999_eval_loss_0_2802.pt"),
+                        "norm_path": os.path.join(dir_root,
+                                                  "1643964797_0763805_batches_1_learner_20_s_0_0100_pre_train_5/norm_epoch_9999_eval_loss_0_2802.pt")}
+                       ]
 
     hyper_params_list = hyper_params[args.set_num]
     for hyper_param_dict_iter in hyper_params_list:

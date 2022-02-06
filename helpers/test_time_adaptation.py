@@ -10,7 +10,7 @@ from .utils import random_contrast_transform, augmentation_by_normalizer
 def data_aug(X, normalizer_list, device):
     # X: (B, 1, H, W), [0, 1]
     X = random_contrast_transform(X)
-    # X = augmentation_by_normalizer(X, normalizer_list, device=device)
+    X = augmentation_by_normalizer(X, normalizer_list, device=device)
 
     return X.float()
 
