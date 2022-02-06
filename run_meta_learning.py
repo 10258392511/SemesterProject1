@@ -13,7 +13,7 @@ from helpers.baseline_step_by_step import MetaLearner
 
 if __name__ == '__main__':
     """
-    python ./run_meta_learning.py --train_source_name "csf" --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 2 --num_workers 0 --lam_smooth 0.01 --num_batches_to_sample 1 --num_learner_steps 10 --pre_train_epochs 2
+    python ./run_meta_learning.py --train_source_name "csf" --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 2 --num_workers 0 --lam_smooth 0.01 --num_batches_to_sample 1 --num_learner_steps 10 --pre_train_epochs 0
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda")
@@ -23,7 +23,7 @@ if __name__ == '__main__':
     parser.add_argument("--batch_size", type=int, default=6)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--total_steps", type=int, default=10000)
-    parser.add_argument("--eval_interval", type=int, default=500)
+    parser.add_argument("--eval_interval", type=int, default=200)
 
     parser.add_argument("--lam_smooth", type=float, required=True)
     parser.add_argument("--num_batches_to_sample", type=int, required=True)

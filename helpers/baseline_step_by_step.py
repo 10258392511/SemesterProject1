@@ -996,6 +996,7 @@ class MetaLearner(BasicTrainer):
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            loss_sup += loss_unsup  ### new: using data-consistency during meta_learn
             self.norm_opt.zero_grad()
             self.u_net_opt.zero_grad()
             loss_sup.backward()
@@ -1076,6 +1077,7 @@ class MetaLearner(BasicTrainer):
             X = X.to(self.device)
             mask = mask.to(self.device)
             loss_sup, loss_unsup = self._compute_u_net_loss(X, mask)
+            loss_sup += loss_unsup  ### new: using data-consistency during meta-learn
             loss_sup_avg += loss_sup * X.shape[0]
             num_samples += X.shape[0]
 
@@ -1174,9 +1176,11 @@ class MetaLearner(BasicTrainer):
                     # self.normalizer_cp.load_state_dict(self.normalizer.state_dict())
                     # self.normalizer_cp.eval()
                     dataset = self.test_dataset_dict[key]
-                    loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer, self.u_net,
-                                               self.device, self.notebook, norm_opt_config=self.norm_opt_config,
-                                               max_iters=self.num_learner_steps, normalizer_cp=self.normalizer_cp)
+                    # loss = evaluate_3d_wrapper(evaluate_3d_adapt_batch, dataset, self.normalizer, self.u_net,
+                    #                            self.device, self.notebook, norm_opt_config=self.norm_opt_config,
+                    #                            max_iters=self.num_learner_steps, normalizer_cp=self.normalizer_cp)
+                    loss = evaluate_3d_wrapper(evaluate_3d_no_adapt, dataset, self.normalizer, self.u_net,
+                                               self.device, self.notebook)
                     losses_eval_3d[key] = loss
 
                 for key in losses_eval_3d:
