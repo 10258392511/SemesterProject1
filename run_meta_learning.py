@@ -13,7 +13,7 @@ from helpers.baseline_step_by_step import MetaLearner
 
 if __name__ == '__main__':
     """
-    python ./run_meta_learning.py --train_source_name "csf" --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 2 --num_workers 0 --lam_smooth 0.01 --num_batches_to_sample 1 --num_learner_steps 10 --pre_train_epochs 0
+    python ./run_meta_learning.py --train_source_name "csf" --input_dir "data/MnMs_extracted/MnMs_extracted.h5" --input_dir_3d "data/MnMs_extracted/MnMs_extracted_3d.h5" --device "cuda" --batch_size 2 --num_workers 0 --lam_smooth 0.01 --num_batches_to_sample 1 --num_learner_steps 10 --pre_train_epochs 2
     """
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda")
