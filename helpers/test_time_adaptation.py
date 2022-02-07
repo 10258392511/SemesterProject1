@@ -122,7 +122,7 @@ def test_time_adaptation_avg(X, mask, normalizer, u_net, normalizer_cps, norm_op
     for normalizer_cp in normalizer_cps:
         normalizer_cp.train()
     local_dataset = TensorDataset(X)
-    local_dataloader = DataLoader(local_dataset, batch_size=batch_size, shuffle=True)
+    local_dataloader = DataLoader(local_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
 
     X = X.to(device)
     mask = mask.to(device)

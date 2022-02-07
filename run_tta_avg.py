@@ -38,7 +38,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch_size", type=int, required=True)
-    parser.add_argument("--num_agents", type=int, default=10)
+    parser.add_argument("--num_agents", type=int, default=20)
     parser.add_argument("--lr", type=float, default=5e-2)
     parser.add_argument("--max_iters", type=int, default=50)
     parser.add_argument("--u_net_path", required=True)
