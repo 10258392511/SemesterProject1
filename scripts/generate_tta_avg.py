@@ -30,7 +30,7 @@ def create_filename(hyper_param_dict: dict):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--set_num", type=int, choices=[1, 2], required=True)
+    parser.add_argument("--set_num", type=int, choices=[1, 2, 3], required=True)
 
     args = parser.parse_args()
     hyper_params = dict()
@@ -64,6 +64,18 @@ if __name__ == '__main__':
                                                    "1643964797_0763805_batches_1_learner_20_s_0_0100_pre_train_5/u_net_epoch_9999_eval_loss_0_2802.pt"),
                         "norm_path": os.path.join(dir_root,
                                                   "1643964797_0763805_batches_1_learner_20_s_0_0100_pre_train_5/norm_epoch_9999_eval_loss_0_2802.pt")}
+                       ]
+
+    # set 3
+    dir_root = "test_time_adapt_params"
+    hyper_params[3] = [{"u_net_path": os.path.join(dir_root,
+                                                   "1644220919_7856724_batches_1_learner_10_s_0_0100_pre_train_5/u_net_epoch_8600_eval_loss_0_2589.pt"),
+                        "norm_path": os.path.join(dir_root,
+                                                  "1644220919_7856724_batches_1_learner_10_s_0_0100_pre_train_5/norm_epoch_8600_eval_loss_0_2589.pt")},
+                       {"u_net_path": os.path.join(dir_root,
+                                                   "1644220882_6335523_batches_1_learner_1_s_0_0100_pre_train_5/u_net_epoch_6200_eval_loss_0_2613.pt"),
+                        "norm_path": os.path.join(dir_root,
+                                                  "1644220882_6335523_batches_1_learner_1_s_0_0100_pre_train_5/norm_epoch_6200_eval_loss_0_2613.pt")}
                        ]
 
     hyper_params_list = hyper_params[args.set_num]
