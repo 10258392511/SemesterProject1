@@ -30,7 +30,7 @@ def create_filename(hyper_param_dict: dict):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--set_num", type=int, choices=[1, 2, 3], required=True)
+    parser.add_argument("--set_num", type=int, choices=[1, 2, 3, 4], required=True)
 
     args = parser.parse_args()
     hyper_params = dict()
@@ -76,6 +76,14 @@ if __name__ == '__main__':
                                                    "1644220882_6335523_batches_1_learner_1_s_0_0100_pre_train_5/u_net_epoch_6200_eval_loss_0_2613.pt"),
                         "norm_path": os.path.join(dir_root,
                                                   "1644220882_6335523_batches_1_learner_1_s_0_0100_pre_train_5/norm_epoch_6200_eval_loss_0_2613.pt")}
+                       ]
+
+    # set 4
+    dir_root = "test_time_adapt_params"
+    hyper_params[3] = [{"u_net_path": os.path.join(dir_root,
+                                                   "1644303398_304775_batches_1_learner_20_s_0_0100_pre_train_5/u_net_epoch_9600_eval_loss_0_2653.pt"),
+                        "norm_path": os.path.join(dir_root,
+                                                  "1644303398_304775_batches_1_learner_20_s_0_0100_pre_train_5/norm_epoch_9600_eval_loss_0_2653.pt")}
                        ]
 
     hyper_params_list = hyper_params[args.set_num]

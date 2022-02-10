@@ -98,5 +98,6 @@ if __name__ == '__main__':
                                                                 device=DEVICE, if_notebook=False)
 
     directory_name = os.path.basename(os.path.dirname(args.u_net_path))  # timestamp_config
+    directory_name += "_old_aug"
     save_dir = os.path.join(save_root_dir, directory_name)  # test_time_adapt_results/timestamp_config
     save_results(save_dir, losses_out, figs_out, figs_pred_out)
